@@ -25,7 +25,9 @@ Resultado esperado: el bundle compila sin errores y la app carga la pantalla de 
 | Home con subastas abiertas y barra inferior | OK | Captura 02 |
 | Compras distingue pujas ganadoras pendientes | OK | Captura 03 |
 | Confirmar pago mueve una adjudicacion a compra pagada | OK | Captura 04 |
+| Confirmar pago muestra modal preventivo antes de registrar | OK | Captura 08 |
 | Sala en vivo muestra lote, puja actual, selector de monto y CTA | OK | Captura 05 |
+| Sala en vivo muestra toast al registrar una puja | OK | Captura 09 |
 | Perfil muestra datos del usuario y estadisticas | OK | Captura 06 |
 | Penalidades permite pagar o marcar como solucionada | OK | Captura 07 |
 
@@ -70,6 +72,14 @@ Resultado esperado: el bundle compila sin errores y la app carga la pantalla de 
 ### 07 - Penalidades
 
 ![Penalidades](./docs/qa/captures/07-penalidades.png)
+
+### 08 - Modal de confirmar pago
+
+![Modal confirmar pago](./docs/qa/captures/08-confirmar-pago-modal.png)
+
+### 09 - Toast de puja registrada
+
+![Toast puja registrada](./docs/qa/captures/09-puja-toast.png)
 
 ## Riesgos pendientes
 

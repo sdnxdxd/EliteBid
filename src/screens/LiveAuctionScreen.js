@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { getAuctionDetail, placeBid } from '../backend/auctionService';
+import AppToast from '../components/AppToast';
 import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import { colors, radii } from '../theme';
 
@@ -23,6 +24,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user 
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
 
   async function load() {
     const detail = await getAuctionDetail(auctionId, user.clienteId);
@@ -103,11 +105,13 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user 
     setAmount(formatInputAmount(nextAmount));
     setError('');
     setMessage('');
+    setToast(null);
   }
 
   async function submitBid() {
     setError('');
     setMessage('');
+    setToast(null);
     setSending(true);
 
     try {
@@ -116,9 +120,11 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user 
       setAuction(result.auction);
       setAmount(formatInputAmount(getSuggestedBid(result.auction)));
       setMessage('Puja confirmada. Ahora estas liderando este lote.');
+      setToast({ message: 'Puja registrada. Vas liderando este lote.', tone: 'success' });
       await load();
     } catch (bidError) {
       setError(bidError.message);
+      setToast({ message: bidError.message, tone: 'danger' });
     } finally {
       setSending(false);
     }
@@ -220,6 +226,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user 
                   setAmount(value);
                   setError('');
                   setMessage('');
+                  setToast(null);
                 }}
                 placeholder="Monto"
                 placeholderTextColor="rgba(201, 196, 211, 0.55)"
@@ -278,6 +285,13 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user 
       </ScrollView>
 
       <BottomNav activeTab="auctions" onNavigate={onNavigate} />
+      <AppToast
+        bottom={bottomNavHeight + 12}
+        message={toast?.message}
+        onDone={() => setToast(null)}
+        tone={toast?.tone}
+        visible={Boolean(toast)}
+      />
     </View>
   );
 }
@@ -312,7 +326,9 @@ function parseCurrency(value) {
 }
 
 function formatInputAmount(value) {
-  return String(Math.ceil(Number(value || 0)));
+  return Number(value || 0).toLocaleString('es-AR', {
+    maximumFractionDigits: 0
+  });
 }
 
 function formatMoney(value) {

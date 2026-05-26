@@ -6,6 +6,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { getUserPurchases, settlePurchase } from '../backend/auctionService';
 import AppToast from '../components/AppToast';
 import BottomNav, { bottomNavHeight } from '../components/BottomNav';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { colors, radii } from '../theme';
 
 const filters = [
@@ -18,6 +19,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
   const [purchases, setPurchases] = useState([]);
   const [filter, setFilter] = useState('todas');
   const [loading, setLoading] = useState(true);
+  const [pendingPayment, setPendingPayment] = useState(null);
   const [settlingId, setSettlingId] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -66,15 +68,20 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
     return purchases.filter((purchase) => purchase.paymentStatus === filter);
   }, [filter, purchases]);
 
-  async function confirmPayment(purchaseId) {
-    setSettlingId(purchaseId);
+  async function confirmPayment() {
+    if (!pendingPayment) {
+      return;
+    }
+
+    setSettlingId(pendingPayment.id);
 
     try {
-      const rows = await settlePurchase(user.clienteId, purchaseId);
+      const rows = await settlePurchase(user.clienteId, pendingPayment.id);
       setPurchases(rows);
-      setToast('Compra pagada y registrada.');
+      setToast({ message: 'Compra pagada y registrada.', tone: 'success' });
+      setPendingPayment(null);
     } catch (paymentError) {
-      setToast(paymentError.message);
+      setToast({ message: paymentError.message, tone: 'danger' });
     } finally {
       setSettlingId(null);
     }
@@ -132,7 +139,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
             {visiblePurchases.map((purchase) => (
               <PurchaseCard
                 key={purchase.id}
-                onConfirmPayment={confirmPayment}
+                onConfirmPayment={setPendingPayment}
                 purchase={purchase}
                 settling={settlingId === purchase.id}
               />
@@ -155,10 +162,24 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
       <BottomNav activeTab="purchases" onNavigate={onNavigate} />
       <AppToast
         bottom={bottomNavHeight + 12}
-        message={toast}
+        message={toast?.message}
         onDone={() => setToast(null)}
-        tone={toast?.includes('No encontramos') ? 'danger' : 'success'}
+        tone={toast?.tone}
         visible={Boolean(toast)}
+      />
+      <ConfirmDialog
+        confirmLabel="Confirmar pago"
+        icon="cash-check"
+        loading={Boolean(pendingPayment && settlingId === pendingPayment.id)}
+        message={
+          pendingPayment
+            ? `Vas a registrar el pago de ${formatMoney(pendingPayment.amount)} para ${pendingPayment.title}.`
+            : ''
+        }
+        onCancel={() => setPendingPayment(null)}
+        onConfirm={confirmPayment}
+        title="Confirmar pago"
+        visible={Boolean(pendingPayment)}
       />
     </View>
   );
@@ -196,7 +217,7 @@ function PurchaseCard({ onConfirmPayment, purchase, settling }) {
         {!paid ? (
           <Pressable
             disabled={settling}
-            onPress={() => onConfirmPayment?.(purchase.id)}
+            onPress={() => onConfirmPayment?.(purchase)}
             style={[styles.payButton, settling && styles.payButtonDisabled]}
           >
             {settling ? (
