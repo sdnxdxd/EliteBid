@@ -4,11 +4,16 @@ import { ActivityIndicator, StatusBar, StyleSheet, Text, View } from 'react-nati
 import { initDatabase } from './src/backend/database';
 import { getActiveSession, signOut } from './src/backend/authService';
 import AddPaymentScreen from './src/screens/AddPaymentScreen';
+import AuctionDetailScreen from './src/screens/AuctionDetailScreen';
+import AuctionsScreen from './src/screens/AuctionsScreen';
+import FavoritesScreen from './src/screens/FavoritesScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import LiveAuctionScreen from './src/screens/LiveAuctionScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
 import PenaltiesScreen from './src/screens/PenaltiesScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import PurchasesScreen from './src/screens/PurchasesScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import { colors } from './src/theme';
@@ -18,7 +23,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authView, setAuthView] = useState('login');
   const [appView, setAppView] = useState('home');
+  const [detailBackView, setDetailBackView] = useState('auctions');
   const [paymentBackView, setPaymentBackView] = useState('home');
+  const [selectedAuctionId, setSelectedAuctionId] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -63,6 +70,21 @@ export default function App() {
   function openPayments(fromView) {
     setPaymentBackView(fromView);
     setAppView('payments');
+  }
+
+  function navigateTab(tab) {
+    setAppView(tab);
+  }
+
+  function openAuctionDetail(auctionId, fromView = 'auctions') {
+    setSelectedAuctionId(auctionId);
+    setDetailBackView(fromView);
+    setAppView('auctionDetail');
+  }
+
+  function openLiveRoom(auctionId) {
+    setSelectedAuctionId(auctionId);
+    setAppView('liveRoom');
   }
 
   if (booting) {
@@ -113,6 +135,7 @@ export default function App() {
         <ProfileScreen
           onBack={() => setAppView('home')}
           onGoHome={() => setAppView('home')}
+          onNavigate={navigateTab}
           onOpenPayments={() => openPayments('profile')}
           onOpenPenalties={() => setAppView('penalties')}
           onSignOut={handleSignOut}
@@ -121,12 +144,44 @@ export default function App() {
         />
       ) : user && appView === 'penalties' ? (
         <PenaltiesScreen onBack={() => setAppView('profile')} user={user} />
+      ) : user && appView === 'auctions' ? (
+        <AuctionsScreen
+          onBack={() => setAppView('home')}
+          onNavigate={navigateTab}
+          onOpenAuctionDetail={openAuctionDetail}
+          user={user}
+        />
+      ) : user && appView === 'favorites' ? (
+        <FavoritesScreen
+          onBack={() => setAppView('home')}
+          onNavigate={navigateTab}
+          onOpenAuctionDetail={openAuctionDetail}
+          user={user}
+        />
+      ) : user && appView === 'purchases' ? (
+        <PurchasesScreen onBack={() => setAppView('home')} onNavigate={navigateTab} user={user} />
+      ) : user && appView === 'auctionDetail' ? (
+        <AuctionDetailScreen
+          auctionId={selectedAuctionId}
+          onBack={() => setAppView(detailBackView)}
+          onEnterRoom={openLiveRoom}
+          onNavigate={navigateTab}
+          user={user}
+        />
+      ) : user && appView === 'liveRoom' ? (
+        <LiveAuctionScreen
+          auctionId={selectedAuctionId}
+          onBack={() => setAppView('auctionDetail')}
+          onNavigate={navigateTab}
+          user={user}
+        />
       ) : user ? (
         <HomeScreen
-          onOpenPayments={() => openPayments('home')}
-          onOpenProfile={() => setAppView('profile')}
-          user={user}
+          onNavigate={navigateTab}
+          onOpenAuctionDetail={openAuctionDetail}
+          onOpenAuctions={() => setAppView('auctions')}
           onSignOut={handleSignOut}
+          user={user}
         />
       ) : authView === 'register' ? (
         <RegisterScreen

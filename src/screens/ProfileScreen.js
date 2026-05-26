@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,11 +15,13 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { getUserProfile, updateProfilePhoto, updateUserProfile } from '../backend/profileService';
+import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import { colors, radii, shadows } from '../theme';
 
 export default function ProfileScreen({
   onBack,
   onGoHome,
+  onNavigate,
   onOpenPayments,
   onOpenPenalties,
   onSignOut,
@@ -27,7 +30,8 @@ export default function ProfileScreen({
 }) {
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState({
-    fullName: '',
+    firstName: '',
+    lastName: '',
     email: '',
     documento: '',
     legalAddress: ''
@@ -35,6 +39,7 @@ export default function ProfileScreen({
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingPhoto, setSavingPhoto] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -48,7 +53,8 @@ export default function ProfileScreen({
 
       setProfile(data);
       setForm({
-        fullName: data?.fullName ?? '',
+        firstName: data?.identityFirstName ?? '',
+        lastName: data?.identityLastName ?? '',
         email: data?.email ?? '',
         documento: data?.documento ?? '',
         legalAddress: data?.legalAddress ?? ''
@@ -91,29 +97,43 @@ export default function ProfileScreen({
   async function changePhoto() {
     setError('');
     setMessage('');
+    setSavingPhoto(true);
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (!permission.granted) {
-      setError('Necesitamos permiso para seleccionar tu foto de perfil.');
-      return;
+      if (!permission.granted) {
+        setError('Necesitamos permiso para seleccionar tu foto de perfil.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        base64: Platform.OS === 'web',
+        mediaTypes: ['images'],
+        quality: 0.75
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      const photoUri =
+        Platform.OS === 'web' && asset.base64
+          ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+          : asset.uri;
+
+      await updateProfilePhoto(user.clienteId, photoUri);
+      const data = await getUserProfile(user.clienteId);
+      setProfile(data);
+      setMessage('Foto de perfil guardada.');
+    } catch (photoError) {
+      setError(photoError.message);
+    } finally {
+      setSavingPhoto(false);
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      mediaTypes: ['images'],
-      quality: 0.75
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
-    await updateProfilePhoto(user.clienteId, result.assets[0].uri);
-    const data = await getUserProfile(user.clienteId);
-    setProfile(data);
-    setMessage('Foto de perfil actualizada.');
   }
 
   if (loading) {
@@ -152,7 +172,11 @@ export default function ProfileScreen({
               )}
             </View>
             <View style={styles.cameraBadge}>
-              <MaterialCommunityIcons color={colors.onPrimaryFixed} name="camera" size={17} />
+              {savingPhoto ? (
+                <ActivityIndicator color={colors.onPrimaryFixed} size="small" />
+              ) : (
+                <MaterialCommunityIcons color={colors.onPrimaryFixed} name="camera" size={17} />
+              )}
             </View>
           </Pressable>
           <Text style={styles.name}>{profile?.fullName}</Text>
@@ -186,9 +210,17 @@ export default function ProfileScreen({
         <View style={styles.formCard}>
           <Field
             editable={false}
-            label="Nombre completo"
-            onChangeText={(value) => updateField('fullName', value)}
-            value={form.fullName}
+            label="Nombre"
+            locked
+            onChangeText={(value) => updateField('firstName', value)}
+            value={form.firstName}
+          />
+          <Field
+            editable={false}
+            label="Apellido"
+            locked
+            onChangeText={(value) => updateField('lastName', value)}
+            value={form.lastName}
           />
           <Field
             autoCapitalize="none"
@@ -202,6 +234,7 @@ export default function ProfileScreen({
             editable={false}
             keyboardType="numeric"
             label="Documento"
+            locked
             onChangeText={(value) => updateField('documento', value)}
             value={form.documento}
           />
@@ -220,7 +253,7 @@ export default function ProfileScreen({
             <Text style={styles.readOnlyValue}>{profile?.paymentCount ?? 0}</Text>
           </View>
           <Text style={styles.lockedCopy}>
-            Nombre y documento estan bloqueados por verificacion de identidad.
+            Nombre, apellido y documento estan bloqueados por verificacion de identidad.
           </Text>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -234,7 +267,8 @@ export default function ProfileScreen({
                   setError('');
                   setMessage('');
                   setForm({
-                    fullName: profile?.fullName ?? '',
+                    firstName: profile?.identityFirstName ?? '',
+                    lastName: profile?.identityLastName ?? '',
                     email: profile?.email ?? '',
                     documento: profile?.documento ?? '',
                     legalAddress: profile?.legalAddress ?? ''
@@ -282,21 +316,23 @@ export default function ProfileScreen({
         </Pressable>
       </ScrollView>
 
-      <View style={styles.bottomNav}>
-        <NavItem icon="home-variant-outline" label="Inicio" onPress={onGoHome} />
-        <NavItem icon="gavel" label="Subastas" />
-        <NavItem icon="heart-outline" label="Favoritos" />
-        <NavItem icon="shopping-outline" label="Compras" />
-        <NavItem active icon="account" label="Perfil" />
-      </View>
+      <BottomNav activeTab="profile" onNavigate={onNavigate ?? ((tab) => tab === 'home' && onGoHome?.())} />
     </View>
   );
 }
 
-function Field({ editable, label, ...props }) {
+function Field({ editable, label, locked, ...props }) {
   return (
     <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>{label}</Text>
+        {locked ? (
+          <View style={styles.lockedPill}>
+            <MaterialCommunityIcons color={colors.primary} name="lock-outline" size={12} />
+            <Text style={styles.lockedPillText}>Bloqueado</Text>
+          </View>
+        ) : null}
+      </View>
       <TextInput
         editable={editable}
         placeholderTextColor="rgba(201, 196, 211, 0.55)"
@@ -323,19 +359,6 @@ function QuickAction({ icon, label, onPress }) {
         <MaterialCommunityIcons color={colors.primary} name={icon} size={24} />
       </View>
       <Text style={styles.quickText}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function NavItem({ active, icon, label, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.navItem, active && styles.navItemActive]}>
-      <MaterialCommunityIcons
-        color={active ? colors.onPrimaryFixed : colors.onSurfaceVariant}
-        name={icon}
-        size={23}
-      />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
     </Pressable>
   );
 }
@@ -422,27 +445,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase'
   },
-  bottomNav: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(26, 11, 49, 0.94)',
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    borderTopWidth: 1,
-    bottom: 0,
-    flexDirection: 'row',
-    height: 88,
-    justifyContent: 'space-around',
-    left: 0,
-    paddingBottom: 12,
-    position: 'absolute',
-    right: 0
-  },
   container: {
     backgroundColor: colors.surfaceLowest,
     flex: 1
   },
   content: {
     padding: 16,
-    paddingBottom: 122,
+    paddingBottom: bottomNavHeight + 34,
     paddingTop: 20
   },
   editActions: {
@@ -491,8 +500,13 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceVariant,
     fontSize: 12,
     fontWeight: '900',
-    marginBottom: 7,
     textTransform: 'uppercase'
+  },
+  labelRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 7
   },
   loading: {
     alignItems: 'center',
@@ -506,6 +520,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 18,
     marginBottom: 12
+  },
+  lockedPill: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(204, 193, 255, 0.1)',
+    borderColor: 'rgba(204, 193, 255, 0.18)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3
+  },
+  lockedPillText: {
+    color: colors.primary,
+    fontSize: 9,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   logo: {
     color: colors.primary,
@@ -558,27 +589,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
     letterSpacing: 0
-  },
-  navItem: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 3,
-    justifyContent: 'center',
-    paddingVertical: 8
-  },
-  navItemActive: {
-    backgroundColor: colors.primaryContainer,
-    borderRadius: radii.full,
-    flex: 0.92
-  },
-  navLabel: {
-    color: colors.onSurfaceVariant,
-    fontSize: 9,
-    fontWeight: '900',
-    textTransform: 'uppercase'
-  },
-  navLabelActive: {
-    color: colors.onPrimaryFixed
   },
   penaltyAmount: {
     color: colors.error,

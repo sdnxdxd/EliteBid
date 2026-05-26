@@ -1,9 +1,19 @@
 import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
+
+import { createWebDatabase } from './webDatabase';
 
 let databasePromise;
 
+function getDatabaseName() {
+  if (Platform.OS !== 'web') {
+    return 'elite_bid.db';
+  }
+
+  return ':memory:';
+}
+
 const schema = `
-PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS paises (
@@ -193,6 +203,15 @@ CREATE TABLE IF NOT EXISTS sesiones (
   FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
 );
 
+CREATE TABLE IF NOT EXISTS favoritos (
+  cliente INTEGER NOT NULL,
+  subasta INTEGER NOT NULL,
+  creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (cliente, subasta),
+  FOREIGN KEY (cliente) REFERENCES clientes (identificador),
+  FOREIGN KEY (subasta) REFERENCES subastas (identificador)
+);
+
 CREATE TABLE IF NOT EXISTS penalidades (
   identificador INTEGER PRIMARY KEY AUTOINCREMENT,
   cliente INTEGER NOT NULL,
@@ -208,7 +227,10 @@ CREATE TABLE IF NOT EXISTS penalidades (
 
 export async function getDatabase() {
   if (!databasePromise) {
-    databasePromise = SQLite.openDatabaseAsync('elite_bid.db');
+    databasePromise =
+      Platform.OS === 'web'
+        ? Promise.resolve(createWebDatabase())
+        : SQLite.openDatabaseAsync(getDatabaseName());
   }
 
   return databasePromise;

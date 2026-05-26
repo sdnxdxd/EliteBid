@@ -3,12 +3,15 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { getUserPenalties } from '../backend/penaltyService';
+import { getUserPenalties, settlePenalty } from '../backend/penaltyService';
+import AppToast from '../components/AppToast';
 import { colors, radii } from '../theme';
 
 export default function PenaltiesScreen({ onBack, user }) {
   const [penalties, setPenalties] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [settlingId, setSettlingId] = useState(null);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -28,6 +31,24 @@ export default function PenaltiesScreen({ onBack, user }) {
       mounted = false;
     };
   }, [user.clienteId]);
+
+  async function handleSettle(penalty, mode) {
+    setSettlingId(penalty.id);
+
+    try {
+      const rows = await settlePenalty(user.clienteId, penalty.id);
+      setPenalties(rows);
+      setToast(
+        mode === 'pay'
+          ? 'Penalidad pagada. Tu cuenta queda actualizada.'
+          : 'Penalidad marcada como solucionada.'
+      );
+    } catch (settleError) {
+      setToast(settleError.message);
+    } finally {
+      setSettlingId(null);
+    }
+  }
 
   return (
     <View style={styles.container}>
@@ -62,18 +83,31 @@ export default function PenaltiesScreen({ onBack, user }) {
           ) : (
             <View style={styles.list}>
               {penalties.map((penalty) => (
-                <PenaltyCard key={penalty.id} penalty={penalty} />
+                <PenaltyCard
+                  key={penalty.id}
+                  onSettle={handleSettle}
+                  penalty={penalty}
+                  settling={settlingId === penalty.id}
+                />
               ))}
             </View>
           )}
         </ScrollView>
       )}
+      <AppToast
+        bottom={24}
+        message={toast}
+        onDone={() => setToast(null)}
+        tone={toast?.includes('No encontramos') || toast?.includes('ya esta') ? 'danger' : 'success'}
+        visible={Boolean(toast)}
+      />
     </View>
   );
 }
 
-function PenaltyCard({ penalty }) {
-  const active = penalty.status === 'activa';
+function PenaltyCard({ onSettle, penalty, settling }) {
+  const active = penalty.status === 'activa' || penalty.status === 'vencida';
+  const blocked = settling || !active;
 
   return (
     <View style={[styles.card, active && styles.cardActive]}>
@@ -94,6 +128,28 @@ function PenaltyCard({ penalty }) {
           <Text style={[styles.status, active && styles.statusActive]}>{penalty.status}</Text>
           <Text style={styles.dueDate}>Vence: {formatDate(penalty.dueDate)}</Text>
         </View>
+        {active ? (
+          <View style={styles.actionRow}>
+            <Pressable
+              disabled={blocked}
+              onPress={() => onSettle?.(penalty, 'pay')}
+              style={[styles.primaryAction, blocked && styles.actionDisabled]}
+            >
+              {settling ? (
+                <ActivityIndicator color={colors.onPrimaryFixed} />
+              ) : (
+                <Text style={styles.primaryActionText}>Pagar ahora</Text>
+              )}
+            </Pressable>
+            <Pressable
+              disabled={blocked}
+              onPress={() => onSettle?.(penalty, 'solve')}
+              style={[styles.secondaryAction, blocked && styles.actionDisabled]}
+            >
+              <Text style={styles.secondaryActionText}>Solucionada</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -120,6 +176,14 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: 13,
     fontWeight: '900'
+  },
+  actionDisabled: {
+    opacity: 0.55
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 14
   },
   card: {
     alignItems: 'flex-start',
@@ -224,6 +288,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 12
+  },
+  primaryAction: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.full,
+    flex: 1,
+    height: 40,
+    justifyContent: 'center'
+  },
+  primaryActionText: {
+    color: colors.onPrimaryFixed,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  secondaryAction: {
+    alignItems: 'center',
+    borderColor: 'rgba(204, 193, 255, 0.28)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flex: 1,
+    height: 40,
+    justifyContent: 'center'
+  },
+  secondaryActionText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   status: {
     color: colors.onSurfaceVariant,

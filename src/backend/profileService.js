@@ -27,13 +27,15 @@ export async function getUserProfile(clienteId) {
       ) AS auctionsAttended,
       (
         SELECT COUNT(*)
-        FROM registro_de_subasta r
-        WHERE r.cliente = p.identificador
+        FROM pujos pu
+        JOIN asistentes a ON a.identificador = pu.asistente
+        WHERE a.cliente = p.identificador AND pu.ganador = 'si'
       ) AS auctionsWon,
       (
-        SELECT COALESCE(SUM(r.importe), 0)
-        FROM registro_de_subasta r
-        WHERE r.cliente = p.identificador
+        SELECT COALESCE(SUM(pu.importe), 0)
+        FROM pujos pu
+        JOIN asistentes a ON a.identificador = pu.asistente
+        WHERE a.cliente = p.identificador AND pu.ganador = 'si'
       ) AS invested,
       (
         SELECT COUNT(*)
@@ -53,13 +55,23 @@ export async function getUserProfile(clienteId) {
     [clienteId]
   );
 
-  return profile;
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    ...profile,
+    identityFirstName: getFirstName(profile.fullName),
+    identityLastName: getLastName(profile.fullName)
+  };
 }
 
 export async function updateUserProfile(userId, clienteId, payload) {
   validateProfile(payload);
 
   const db = await getDatabase();
+  await assertImmutableIdentity(db, clienteId, payload);
+
   const normalizedEmail = payload.email.trim().toLowerCase();
   const duplicate = await db.getFirstAsync(
     'SELECT id FROM usuarios WHERE lower(email) = ? AND id <> ?',
@@ -109,4 +121,41 @@ function validateProfile(payload) {
   if (!payload.legalAddress?.trim()) {
     throw new Error('Ingresa tu domicilio legal.');
   }
+}
+
+async function assertImmutableIdentity(db, clienteId, payload) {
+  const current = await db.getFirstAsync(
+    `SELECT documento, nombre AS fullName
+     FROM personas
+     WHERE identificador = ?`,
+    [clienteId]
+  );
+
+  if (!current) {
+    throw new Error('No encontramos tu perfil.');
+  }
+
+  const immutableFields = [
+    [payload.firstName, getFirstName(current.fullName), 'El nombre no se puede modificar.'],
+    [payload.lastName, getLastName(current.fullName), 'El apellido no se puede modificar.'],
+    [payload.documento, current.documento, 'El documento no se puede modificar.']
+  ];
+
+  for (const [nextValue, currentValue, message] of immutableFields) {
+    if (nextValue != null && normalizeIdentityValue(nextValue) !== normalizeIdentityValue(currentValue)) {
+      throw new Error(message);
+    }
+  }
+}
+
+function getFirstName(fullName = '') {
+  return String(fullName).trim().split(/\s+/)[0] ?? '';
+}
+
+function getLastName(fullName = '') {
+  return String(fullName).trim().split(/\s+/).slice(1).join(' ');
+}
+
+function normalizeIdentityValue(value = '') {
+  return String(value).trim().replace(/\s+/g, ' ').toLowerCase();
 }

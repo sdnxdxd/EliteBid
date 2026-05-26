@@ -20,3 +20,31 @@ export async function getUserPenalties(clienteId) {
     [clienteId]
   );
 }
+
+export async function settlePenalty(clienteId, penaltyId) {
+  const db = await getDatabase();
+  const penalty = await db.getFirstAsync(
+    `SELECT identificador AS id, estado AS status
+     FROM penalidades
+     WHERE identificador = ? AND cliente = ?
+     LIMIT 1`,
+    [penaltyId, clienteId]
+  );
+
+  if (!penalty) {
+    throw new Error('No encontramos esa penalidad.');
+  }
+
+  if (penalty.status !== 'activa' && penalty.status !== 'vencida') {
+    throw new Error('Esa penalidad ya esta solucionada.');
+  }
+
+  await db.runAsync(
+    `UPDATE penalidades
+     SET estado = ?
+     WHERE identificador = ? AND cliente = ?`,
+    ['pagada', penaltyId, clienteId]
+  );
+
+  return getUserPenalties(clienteId);
+}

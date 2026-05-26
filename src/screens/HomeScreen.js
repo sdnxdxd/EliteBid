@@ -12,7 +12,14 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { getHomeAuctions, getUserSummary } from '../backend/auctionService';
+import {
+  getFavoriteAuctionIds,
+  getHomeAuctions,
+  getUserSummary,
+  toggleFavoriteAuction
+} from '../backend/auctionService';
+import AppToast from '../components/AppToast';
+import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import { colors, radii, shadows } from '../theme';
 
 const categoryLabel = {
@@ -23,11 +30,19 @@ const categoryLabel = {
   platino: 'Platino'
 };
 
-export default function HomeScreen({ user, onOpenPayments, onOpenProfile, onSignOut }) {
+export default function HomeScreen({
+  user,
+  onNavigate,
+  onOpenAuctionDetail,
+  onOpenAuctions,
+  onSignOut
+}) {
   const [liveAuctions, setLiveAuctions] = useState([]);
   const [upcomingAuctions, setUpcomingAuctions] = useState([]);
+  const [favoriteIds, setFavoriteIds] = useState([]);
   const [summary, setSummary] = useState({ verifiedPayments: 0, totalBids: 0 });
   const [refreshing, setRefreshing] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -37,25 +52,37 @@ export default function HomeScreen({ user, onOpenPayments, onOpenProfile, onSign
   }, []);
 
   async function load() {
-    const [auctions, userSummary] = await Promise.all([
+    const [auctions, userSummary, favorites] = await Promise.all([
       getHomeAuctions(),
-      getUserSummary(user.clienteId)
+      getUserSummary(user.clienteId),
+      getFavoriteAuctionIds(user.clienteId)
     ]);
 
     setLiveAuctions(auctions.live);
     setUpcomingAuctions(auctions.upcoming);
+    setFavoriteIds(favorites);
     setSummary(userSummary);
   }
 
   useEffect(() => {
     load();
-  }, []);
+  }, [user.clienteId]);
 
   async function refresh() {
     setRefreshing(true);
     await load();
     setRefreshing(false);
   }
+
+  async function toggleFavorite(auctionId) {
+    const wasFavorite = favoriteIds.includes(auctionId);
+    const nextIds = await toggleFavoriteAuction(user.clienteId, auctionId);
+
+    setFavoriteIds(nextIds);
+    setToast(wasFavorite ? 'Quitado de favoritos.' : 'Agregado a favoritos.');
+  }
+
+  const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
 
   return (
     <View style={styles.container}>
@@ -104,40 +131,57 @@ export default function HomeScreen({ user, onOpenPayments, onOpenProfile, onSign
           <MetricCard label="Pujas realizadas" value={summary.totalBids} />
         </View>
 
-        <SectionHeader action="Ver todas" title="Subastas abiertas" />
+        <SectionHeader action="Ver todas" onAction={onOpenAuctions} title="Subastas abiertas" />
         <ScrollView
           contentContainerStyle={styles.horizontalContent}
           horizontal
           showsHorizontalScrollIndicator={false}
         >
           {liveAuctions.map((auction) => (
-            <AuctionCard auction={auction} key={auction.id} />
+            <AuctionCard
+              auction={auction}
+              isFavorite={favoriteSet.has(auction.id)}
+              key={auction.id}
+              onPress={() => onOpenAuctionDetail?.(auction.id, 'home')}
+              onToggleFavorite={() => toggleFavorite(auction.id)}
+            />
           ))}
         </ScrollView>
 
         <SectionHeader title="Proximas subastas" />
         <View style={styles.list}>
           {upcomingAuctions.map((auction) => (
-            <AuctionListItem auction={auction} key={auction.id} />
+            <AuctionListItem
+              auction={auction}
+              isFavorite={favoriteSet.has(auction.id)}
+              key={auction.id}
+              onPress={() => onOpenAuctionDetail?.(auction.id, 'home')}
+              onToggleFavorite={() => toggleFavorite(auction.id)}
+            />
           ))}
         </View>
       </ScrollView>
 
-      <View style={styles.bottomNav}>
-        <NavItem active icon="home-variant" label="Inicio" />
-        <NavItem icon="heart-outline" label="Favoritos" />
-        <NavItem icon="credit-card-outline" label="Pagos" onPress={onOpenPayments} />
-        <NavItem icon="account-outline" label="Perfil" onPress={onOpenProfile} />
-      </View>
+      <BottomNav activeTab="home" onNavigate={onNavigate} />
+      <AppToast
+        bottom={bottomNavHeight + 12}
+        message={toast}
+        onDone={() => setToast(null)}
+        visible={Boolean(toast)}
+      />
     </View>
   );
 }
 
-function SectionHeader({ action, title }) {
+function SectionHeader({ action, onAction, title }) {
   return (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      {action ? <Text style={styles.sectionAction}>{action}</Text> : null}
+      {action ? (
+        <Pressable onPress={onAction}>
+          <Text style={styles.sectionAction}>{action}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -151,9 +195,9 @@ function MetricCard({ label, value }) {
   );
 }
 
-function AuctionCard({ auction }) {
+function AuctionCard({ auction, isFavorite, onPress, onToggleFavorite }) {
   return (
-    <Pressable style={styles.auctionCard}>
+    <Pressable onPress={onPress} style={styles.auctionCard}>
       <View style={styles.cardImageWrap}>
         <Image source={{ uri: auction.imageUrl }} style={styles.cardImage} />
         <LinearGradient
@@ -164,6 +208,19 @@ function AuctionCard({ auction }) {
           <MaterialCommunityIcons color={colors.error} name="clock-outline" size={14} />
           <Text style={styles.liveChipText}>En vivo</Text>
         </View>
+        <Pressable
+          onPress={(event) => {
+            event?.stopPropagation?.();
+            onToggleFavorite?.();
+          }}
+          style={styles.favoriteButton}
+        >
+          <MaterialCommunityIcons
+            color={isFavorite ? colors.secondary : colors.onSurface}
+            name={isFavorite ? 'heart' : 'heart-outline'}
+            size={20}
+          />
+        </Pressable>
       </View>
       <View style={styles.cardBody}>
         <Text style={styles.cardMeta}>{auction.location}</Text>
@@ -177,9 +234,9 @@ function AuctionCard({ auction }) {
   );
 }
 
-function AuctionListItem({ auction }) {
+function AuctionListItem({ auction, isFavorite, onPress, onToggleFavorite }) {
   return (
-    <Pressable style={styles.listItem}>
+    <Pressable onPress={onPress} style={styles.listItem}>
       <Image source={{ uri: auction.imageUrl }} style={styles.listImage} />
       <View style={styles.listCopy}>
         <Text style={styles.cardMeta}>{auction.category}</Text>
@@ -193,19 +250,19 @@ function AuctionListItem({ auction }) {
       <View style={styles.datePill}>
         <Text style={styles.dateText}>{formatShortDate(auction.date)}</Text>
       </View>
-    </Pressable>
-  );
-}
-
-function NavItem({ active, icon, label, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={styles.navItem}>
-      <MaterialCommunityIcons
-        color={active ? colors.primary : colors.onSurfaceVariant}
-        name={icon}
-        size={24}
-      />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
+      <Pressable
+        onPress={(event) => {
+          event?.stopPropagation?.();
+          onToggleFavorite?.();
+        }}
+        style={styles.listFavoriteButton}
+      >
+        <MaterialCommunityIcons
+          color={isFavorite ? colors.secondary : colors.onSurfaceVariant}
+          name={isFavorite ? 'heart' : 'heart-outline'}
+          size={20}
+        />
+      </Pressable>
     </Pressable>
   );
 }
@@ -253,20 +310,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textTransform: 'uppercase'
   },
-  bottomNav: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(38, 24, 62, 0.96)',
-    borderColor: 'rgba(72, 69, 81, 0.3)',
-    borderTopWidth: 1,
-    bottom: 0,
-    flexDirection: 'row',
-    height: 82,
-    justifyContent: 'space-around',
-    left: 0,
-    paddingBottom: 10,
-    position: 'absolute',
-    right: 0
-  },
   cardBody: {
     marginTop: -26,
     padding: 18,
@@ -312,7 +355,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   content: {
-    paddingBottom: 118,
+    paddingBottom: bottomNavHeight + 30,
     paddingHorizontal: 20,
     paddingTop: 42
   },
@@ -331,6 +374,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
     textTransform: 'uppercase'
+  },
+  favoriteButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 5, 43, 0.58)',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    width: 38
   },
   greeting: {
     color: colors.onSurfaceVariant,
@@ -395,6 +451,12 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 12
   },
+  listFavoriteButton: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    width: 28
+  },
   listTitle: {
     color: colors.onSurface,
     fontSize: 16,
@@ -444,20 +506,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 24,
     fontWeight: '900'
-  },
-  navItem: {
-    alignItems: 'center',
-    gap: 4,
-    justifyContent: 'center',
-    width: 78
-  },
-  navLabel: {
-    color: colors.onSurfaceVariant,
-    fontSize: 11,
-    fontWeight: '700'
-  },
-  navLabelActive: {
-    color: colors.primary
   },
   searchBox: {
     alignItems: 'center',
