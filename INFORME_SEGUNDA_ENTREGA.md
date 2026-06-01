@@ -7,13 +7,13 @@
 - Equipo: 17
 - Aplicacion: Elite Bid Auctions
 - Fecha: 26/05/2026
-- Stack actual: Expo + React Native + SQLite local mediante servicios JavaScript
+- Stack actual: Expo + React Native + backend Node/Express + MySQL
 
 ## Objetivo de la segunda entrega
 
 La segunda entrega pide backend y frontend funcionando aproximadamente al 50%, con al menos un circuito completo integrado de punta a punta y una descripcion clara del manejo de errores.
 
-Para esta instancia se priorizo una version navegable y funcional de la aplicacion mobile, conectada a una capa de servicios local que usa SQLite en mobile y un adaptador persistente en memoria/localStorage para web. Esto permite demostrar los circuitos principales sin depender todavia de un backend Express deployado.
+Para esta instancia se priorizo una version navegable y funcional de la aplicacion mobile, conectada a una API Node/Express con persistencia MySQL. Esto permite demostrar los circuitos principales con datos guardados en tablas reales.
 
 ## Alcance implementado
 
@@ -43,16 +43,14 @@ Pantallas implementadas o completadas:
 
 La interfaz respeta la identidad visual de la primera entrega: paleta violeta, iconografia, cards oscuras, CTAs lilas y barra inferior similar al prototipo de Stitch/Figma.
 
-### Backend local / capa de servicios
+### Backend API / capa de servicios
 
-Se implemento una capa de servicios dentro del proyecto Expo:
+Se implemento un backend Express dentro de `server/`:
 
-- `authService`: login, registro, sesion activa, logout y recupero de clave.
-- `auctionService`: listado, detalle, ingreso a sala, reglas de puja, historial, compras y favoritos.
-- `paymentService`: alta, baja y listado de medios de pago.
-- `profileService`: perfil, foto, estadisticas y actualizacion de datos editables.
-- `penaltyService`: listado y resolucion/pago de penalidades.
-- `database`: esquema SQLite, seed inicial y adaptador web.
+- `server/index.js`: endpoints REST para login, registro, subastas, pujas, favoritos, compras, perfil, medios de pago y penalidades.
+- `server/db.js`: conexion a MySQL con pool.
+- `server/schema.sql`: tablas principales del dominio.
+- `server/initDatabase.js`: creacion de base, tablas y seed inicial.
 
 Tablas principales cubiertas:
 
@@ -69,7 +67,7 @@ Tablas principales cubiertas:
 - `favoritos`
 - `penalidades`
 
-En web se agrego `webDatabase.js`, que evita los errores de `expo-sqlite` relacionados con Access Handles y persiste datos en `localStorage`.
+La app Expo consume la API mediante `src/backend/apiClient.js`; ya no se usa SQLite ni `localStorage` como base de datos.
 
 ## Circuito completo integrado
 
@@ -225,7 +223,7 @@ Tambien se realizaron pruebas visuales previas sobre el servidor local Expo para
 
 Para la segunda entrega la aplicacion demuestra los circuitos principales, pero quedan puntos pendientes para una version final:
 
-- No hay backend Express + TypeScript deployado.
+- El backend Express es JavaScript y corre localmente; todavia no esta deployado.
 - No hay JWT real firmado; la sesion se maneja localmente.
 - No hay WebSocket real; el feed se actualiza con datos locales.
 - No hay bloqueo transaccional real para pujas concurrentes.

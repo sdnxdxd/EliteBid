@@ -38,7 +38,7 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
 
     async function load() {
       const [rows, favorites] = await Promise.all([
-        getAuctionList(),
+        getAuctionList(user.clienteId),
         getFavoriteAuctionIds(user.clienteId)
       ]);
 
@@ -142,6 +142,7 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
 
 function AuctionRow({ auction, isFavorite, onPress, onToggleFavorite }) {
   const live = auction.status === 'abierta';
+  const price = live ? auction.currentBid : auction.basePrice;
 
   return (
     <Pressable onPress={onPress} style={styles.auctionRow}>
@@ -162,9 +163,9 @@ function AuctionRow({ auction, isFavorite, onPress, onToggleFavorite }) {
           {auction.location}
         </Text>
         <View style={styles.priceRow}>
-          <Text style={styles.priceLabel}>{live ? 'Puja actual' : 'Precio base'}</Text>
+          <Text style={styles.priceLabel}>{price == null ? 'Precio' : live ? 'Puja actual' : 'Precio base'}</Text>
           <Text style={styles.price}>
-            {formatMoney(live ? auction.currentBid : auction.basePrice)}
+            {price == null ? 'Reservado' : formatMoney(price)}
           </Text>
         </View>
       </View>
@@ -186,6 +187,8 @@ function AuctionRow({ auction, isFavorite, onPress, onToggleFavorite }) {
 }
 
 function formatMoney(value) {
+  if (value == null) return 'Reservado';
+
   return `$ ${Number(value || 0).toLocaleString('es-AR', {
     maximumFractionDigits: 0
   })}`;

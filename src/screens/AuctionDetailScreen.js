@@ -115,8 +115,9 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
   }
 
   const live = auction.status === 'abierta';
+  const guest = user.rol === 'invitado';
   const canJoin =
-    live && auction.eligibility.categoryOk && auction.eligibility.verifiedPayments > 0 && !joining;
+    !guest && live && auction.eligibility.categoryOk && auction.eligibility.verifiedPayments > 0 && !joining;
 
   return (
     <View style={styles.container}>
@@ -180,6 +181,12 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
           </View>
 
           <View style={styles.ruleCard}>
+            {guest ? (
+              <RuleRow
+                ok={false}
+                text="Cuenta invitada: verifica tu email para ver precios, editar datos y participar."
+              />
+            ) : null}
             <RuleRow
               ok={auction.eligibility.categoryOk}
               text={
@@ -196,10 +203,10 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
                   : 'Necesitas un medio de pago verificado'
               }
             />
-            <RuleRow
+            {!guest ? <RuleRow
               ok={live}
               text={live ? `Puja sugerida desde ${formatMoney(suggestedBid)}` : 'La sala abre en la fecha indicada'}
-            />
+            /> : null}
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -259,6 +266,8 @@ function RuleRow({ ok, text }) {
 }
 
 function formatMoney(value) {
+  if (value == null) return 'Reservado';
+
   return `$ ${Number(value || 0).toLocaleString('es-AR', {
     maximumFractionDigits: 0
   })}`;

@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
+import { resendVerificationEmail } from '../backend/authService';
 import { getUserProfile, updateProfilePhoto, updateUserProfile } from '../backend/profileService';
 import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import { colors, radii, shadows } from '../theme';
@@ -40,6 +41,7 @@ export default function ProfileScreen({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingPhoto, setSavingPhoto] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -136,6 +138,25 @@ export default function ProfileScreen({
     }
   }
 
+  async function resendVerification() {
+    setError('');
+    setMessage('');
+    setResendingVerification(true);
+
+    try {
+      const result = await resendVerificationEmail(form.email);
+      setMessage(
+        result.verificationEmailSent
+          ? 'Te reenviamos el mail de verificacion.'
+          : 'La cuenta sigue pendiente. Configura RESEND_API_KEY para enviar el mail real.'
+      );
+    } catch (resendError) {
+      setError(resendError.message);
+    } finally {
+      setResendingVerification(false);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.loading}>
@@ -143,6 +164,8 @@ export default function ProfileScreen({
       </View>
     );
   }
+
+  const guest = user.rol === 'invitado';
 
   return (
     <View style={styles.container}>
@@ -194,13 +217,18 @@ export default function ProfileScreen({
 
         <View style={styles.quickActions}>
           <QuickAction icon="gavel" label="Mis Pujas" />
-          <QuickAction icon="credit-card-outline" label="Pagos" onPress={onOpenPayments} />
+          <QuickAction
+            disabled={guest}
+            icon="credit-card-outline"
+            label="Pagos"
+            onPress={guest ? undefined : onOpenPayments}
+          />
           <QuickAction icon="alert-circle-outline" label="Penalidades" onPress={onOpenPenalties} />
         </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Datos de cuenta</Text>
-          {!editing ? (
+          {!editing && !guest ? (
             <Pressable onPress={() => setEditing(true)}>
               <Text style={styles.sectionAction}>Modificar</Text>
             </Pressable>
@@ -253,8 +281,26 @@ export default function ProfileScreen({
             <Text style={styles.readOnlyValue}>{profile?.paymentCount ?? 0}</Text>
           </View>
           <Text style={styles.lockedCopy}>
-            Nombre, apellido y documento estan bloqueados por verificacion de identidad.
+            {guest
+              ? 'Cuenta invitada: verifica tu email para modificar datos, agregar pagos y participar.'
+              : 'Nombre, apellido y documento estan bloqueados por verificacion de identidad.'}
           </Text>
+          {guest ? (
+            <Pressable
+              disabled={resendingVerification}
+              onPress={resendVerification}
+              style={styles.verificationButton}
+            >
+              {resendingVerification ? (
+                <ActivityIndicator color={colors.onPrimaryFixed} />
+              ) : (
+                <>
+                  <MaterialCommunityIcons color={colors.onPrimaryFixed} name="email-fast-outline" size={18} />
+                  <Text style={styles.primaryButtonText}>Reenviar verificacion</Text>
+                </>
+              )}
+            </Pressable>
+          ) : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -352,9 +398,9 @@ function Stat({ label, tone, value }) {
   );
 }
 
-function QuickAction({ icon, label, onPress }) {
+function QuickAction({ disabled, icon, label, onPress }) {
   return (
-    <Pressable onPress={onPress} style={styles.quickAction}>
+    <Pressable disabled={disabled} onPress={onPress} style={[styles.quickAction, disabled && styles.quickActionDisabled]}>
       <View style={styles.quickIcon}>
         <MaterialCommunityIcons color={colors.primary} name={icon} size={24} />
       </View>
@@ -651,6 +697,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 12
   },
+  quickActionDisabled: {
+    opacity: 0.45
+  },
   quickActions: {
     flexDirection: 'row',
     gap: 10,
@@ -769,5 +818,15 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     paddingHorizontal: 18,
     paddingTop: 42
+  },
+  verificationButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.full,
+    flexDirection: 'row',
+    gap: 8,
+    height: 48,
+    justifyContent: 'center',
+    marginBottom: 12
   }
 });

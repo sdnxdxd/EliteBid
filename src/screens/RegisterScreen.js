@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -20,37 +20,17 @@ import { colors, radii, shadows } from '../theme';
 const initialForm = {
   firstName: '',
   lastName: '',
+  email: '',
   documentNumber: '',
   documentFrontUri: '',
   documentBackUri: '',
-  legalAddress: '',
-  countryNumber: '32',
-  email: '',
-  password: '',
-  confirmPassword: ''
+  legalAddress: ''
 };
 
-const countries = [
-  { label: 'Argentina', value: '32' },
-  { label: 'Espana', value: '724' },
-  { label: 'Mexico', value: '484' },
-  { label: 'Colombia', value: '170' },
-  { label: 'Chile', value: '152' }
-];
-
-const paymentTypes = [
-  { icon: 'credit-card-outline', label: 'Tarjeta', value: 'tarjeta' },
-  { icon: 'bank-outline', label: 'Cuenta', value: 'cuenta' },
-  { icon: 'file-document-outline', label: 'Cheque', value: 'cheque' }
-];
-
 export default function RegisterScreen({ onBack, onRegistered }) {
-  const [step, setStep] = useState(1);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const progress = useMemo(() => (step === 1 ? '50%' : '100%'), [step]);
 
   function updateField(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -79,16 +59,16 @@ export default function RegisterScreen({ onBack, onRegistered }) {
     updateField(side === 'frente' ? 'documentFrontUri' : 'documentBackUri', result.assets[0].uri);
   }
 
-  function continueToCredentials() {
+  async function submitGuest() {
     setError('');
     const required = [
       ['firstName', 'Ingresa tu nombre.'],
       ['lastName', 'Ingresa tu apellido.'],
+      ['email', 'Ingresa tu correo para verificar la cuenta.'],
       ['documentNumber', 'Ingresa tu documento.'],
       ['documentFrontUri', 'Carga la foto del frente del documento.'],
       ['documentBackUri', 'Carga la foto del dorso del documento.'],
-      ['legalAddress', 'Ingresa tu domicilio legal.'],
-      ['countryNumber', 'Selecciona tu pais de origen.']
+      ['legalAddress', 'Ingresa tu domicilio legal.']
     ];
 
     for (const [key, message] of required) {
@@ -98,11 +78,6 @@ export default function RegisterScreen({ onBack, onRegistered }) {
       }
     }
 
-    setStep(2);
-  }
-
-  async function submit() {
-    setError('');
     setLoading(true);
 
     try {
@@ -126,7 +101,7 @@ export default function RegisterScreen({ onBack, onRegistered }) {
       />
 
       <View style={styles.topBar}>
-        <Pressable onPress={step === 1 ? onBack : () => setStep(1)} style={styles.iconButton}>
+        <Pressable onPress={onBack} style={styles.iconButton}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={26} />
         </Pressable>
         <Text style={styles.logo}>Registro</Text>
@@ -135,23 +110,19 @@ export default function RegisterScreen({ onBack, onRegistered }) {
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.progressBlock}>
-          <Text style={styles.progressLabel}>PASO {step === 1 ? '01' : '02'} // 02</Text>
+          <Text style={styles.progressLabel}>VERIFICACION DE CUENTA</Text>
           <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: progress }]} />
+            <View style={[styles.progressFill, { width: '100%' }]} />
           </View>
         </View>
 
-        {step === 1 ? (
-          <PersonalStep form={form} pickDocument={pickDocument} updateField={updateField} />
-        ) : (
-          <CredentialsStep form={form} updateField={updateField} />
-        )}
+        <PersonalStep form={form} pickDocument={pickDocument} updateField={updateField} />
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable
           disabled={loading}
-          onPress={step === 1 ? continueToCredentials : submit}
+          onPress={submitGuest}
           style={styles.primaryButton}
         >
           <LinearGradient
@@ -165,11 +136,11 @@ export default function RegisterScreen({ onBack, onRegistered }) {
             ) : (
               <>
                 <Text style={styles.primaryButtonText}>
-                  {step === 1 ? 'Continuar' : 'Confirmar'}
+                  Continuar como invitado
                 </Text>
                 <MaterialCommunityIcons
                   color={colors.onPrimaryFixed}
-                  name={step === 1 ? 'arrow-right' : 'check'}
+                  name="email-check-outline"
                   size={21}
                 />
               </>
@@ -185,6 +156,12 @@ function PersonalStep({ form, pickDocument, updateField }) {
   return (
     <>
       <Text style={styles.title}>Datos personales</Text>
+      <View style={styles.verifiedBox}>
+        <MaterialCommunityIcons color={colors.primaryContainer} name="email-fast-outline" size={26} />
+        <Text style={styles.verifiedText}>
+          Te vamos a enviar la verificacion por email. Mientras tanto vas a entrar como invitado.
+        </Text>
+      </View>
       <View style={styles.row}>
         <Field
           label="Nombre completo"
@@ -199,6 +176,15 @@ function PersonalStep({ form, pickDocument, updateField }) {
           value={form.lastName}
         />
       </View>
+
+      <Field
+        autoCapitalize="none"
+        keyboardType="email-address"
+        label="Correo de verificacion"
+        onChangeText={(value) => updateField('email', value)}
+        placeholder="tu@email.com"
+        value={form.email}
+      />
 
       <Field
         keyboardType="numeric"
@@ -232,83 +218,9 @@ function PersonalStep({ form, pickDocument, updateField }) {
       <Field
         label="Domicilio legal"
         onChangeText={(value) => updateField('legalAddress', value)}
-        placeholder="Calle, numero, ciudad"
+        placeholder="Calle, numero, ciudad, Argentina"
         value={form.legalAddress}
       />
-
-      <Text style={styles.label}>Pais de origen</Text>
-      <View style={styles.segmentGrid}>
-        {countries.map((country) => (
-          <Chip
-            active={form.countryNumber === country.value}
-            key={country.value}
-            label={country.label}
-            onPress={() => updateField('countryNumber', country.value)}
-          />
-        ))}
-      </View>
-    </>
-  );
-}
-
-function CredentialsStep({ form, updateField }) {
-  const passwordRules = [
-    { label: 'Minimo 8 caracteres', valid: form.password.length >= 8 },
-    { label: 'Al menos un numero', valid: /\d/.test(form.password) },
-    { label: 'Al menos un simbolo', valid: /[^A-Za-z0-9]/.test(form.password) }
-  ];
-
-  return (
-    <>
-      <Text style={styles.title}>Crear clave</Text>
-      <View style={styles.verifiedBox}>
-        <MaterialCommunityIcons color={colors.primaryContainer} name="check-circle" size={26} />
-        <Text style={styles.verifiedText}>
-          Tu cuenta fue verificada. Crea tu clave para continuar con tus medios de pago.
-        </Text>
-      </View>
-
-      <Field
-        autoCapitalize="none"
-        keyboardType="email-address"
-        label="Correo"
-        onChangeText={(value) => updateField('email', value)}
-        placeholder="tu@email.com"
-        value={form.email}
-      />
-      <Field
-        label="Nueva contrasena"
-        onChangeText={(value) => updateField('password', value)}
-        placeholder="Ingresa tu clave"
-        secureTextEntry
-        value={form.password}
-      />
-      <Field
-        label="Confirmar contrasena"
-        onChangeText={(value) => updateField('confirmPassword', value)}
-        placeholder="Repite tu clave"
-        secureTextEntry
-        value={form.confirmPassword}
-      />
-
-      <View style={styles.rules}>
-        {passwordRules.map((rule) => (
-          <View key={rule.label} style={styles.ruleRow}>
-            <MaterialCommunityIcons
-              color={rule.valid ? '#73E6A2' : colors.error}
-              name={rule.valid ? 'check-circle' : 'close-circle'}
-              size={18}
-            />
-            <Text style={[styles.rule, rule.valid && styles.ruleValid]}>{rule.label}</Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.nextStepBox}>
-        <MaterialCommunityIcons color={colors.primary} name="credit-card-plus-outline" size={26} />
-        <Text style={styles.nextStepText}>
-          Al confirmar, vas a pasar a Metodos de Pago para agregar cuenta, tarjeta o cheque.
-        </Text>
-      </View>
     </>
   );
 }
@@ -336,46 +248,7 @@ function DocumentButton({ done, icon, label, onPress }) {
   );
 }
 
-function Chip({ active, label, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function PaymentTypeButton({ active, icon, label, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.paymentType, active && styles.paymentTypeActive]}>
-      <MaterialCommunityIcons color={active ? colors.onPrimaryFixed : colors.primary} name={icon} size={22} />
-      <Text style={[styles.paymentTypeText, active && styles.paymentTypeTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  chip: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceHigh,
-    borderColor: 'rgba(72, 69, 81, 0.34)',
-    borderRadius: radii.full,
-    borderWidth: 1,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14
-  },
-  chipActive: {
-    backgroundColor: colors.primaryContainer,
-    borderColor: colors.primaryContainer
-  },
-  chipText: {
-    color: colors.onSurfaceVariant,
-    fontSize: 12,
-    fontWeight: '800'
-  },
-  chipTextActive: {
-    color: colors.onPrimaryFixed
-  },
   container: {
     backgroundColor: colors.surfaceLowest,
     flex: 1
@@ -492,34 +365,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     textTransform: 'uppercase'
   },
-  paymentType: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceHigh,
-    borderColor: 'rgba(72, 69, 81, 0.34)',
-    borderRadius: radii.md,
-    borderWidth: 1,
-    flex: 1,
-    gap: 6,
-    minHeight: 72,
-    justifyContent: 'center'
-  },
-  paymentTypeActive: {
-    backgroundColor: colors.primaryContainer,
-    borderColor: colors.primaryContainer
-  },
-  paymentTypeText: {
-    color: colors.onSurface,
-    fontSize: 12,
-    fontWeight: '800'
-  },
-  paymentTypeTextActive: {
-    color: colors.onPrimaryFixed
-  },
-  paymentTypes: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16
-  },
   primaryButton: {
     borderRadius: radii.full,
     marginTop: 6,
@@ -581,12 +426,6 @@ const styles = StyleSheet.create({
   rules: {
     marginBottom: 22,
     marginTop: -4
-  },
-  segmentGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 18
   },
   title: {
     color: colors.onSurface,

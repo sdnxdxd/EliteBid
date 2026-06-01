@@ -73,6 +73,11 @@ export default function App() {
   }
 
   function navigateTab(tab) {
+    if (user?.rol === 'invitado' && ['favorites', 'purchases'].includes(tab)) {
+      setAppView('auctions');
+      return;
+    }
+
     setAppView(tab);
   }
 
@@ -80,6 +85,10 @@ export default function App() {
     setSelectedAuctionId(auctionId);
     setDetailBackView(fromView);
     setAppView('auctionDetail');
+  }
+
+  function canUseVerifiedFeatures() {
+    return user?.rol !== 'invitado';
   }
 
   function openLiveRoom(auctionId) {
@@ -101,12 +110,22 @@ export default function App() {
     <>
       <StatusBar barStyle="light-content" backgroundColor={colors.surfaceLowest} />
       {user && appView === 'payments' ? (
+        canUseVerifiedFeatures() ? (
         <PaymentMethodsScreen
           onAdd={() => setAppView('addPayment')}
           onBack={() => setAppView(paymentBackView)}
           onUserUpdated={setUser}
           user={user}
         />
+        ) : (
+          <HomeScreen
+            onNavigate={navigateTab}
+            onOpenAuctionDetail={openAuctionDetail}
+            onOpenAuctions={() => setAppView('auctions')}
+            onSignOut={handleSignOut}
+            user={user}
+          />
+        )
       ) : user && appView === 'registrationPayments' ? (
         <PaymentMethodsScreen
           onAdd={() => setAppView('registrationAddPayment')}
@@ -186,7 +205,12 @@ export default function App() {
       ) : authView === 'register' ? (
         <RegisterScreen
           onBack={() => setAuthView('login')}
-          onRegistered={(sessionUser) => handleAuthenticated(sessionUser, 'registrationPayments')}
+          onRegistered={(sessionUser) =>
+            handleAuthenticated(
+              sessionUser,
+              sessionUser.rol === 'invitado' ? 'home' : 'registrationPayments'
+            )
+          }
         />
       ) : authView === 'reset' ? (
         <ResetPasswordScreen onBack={() => setAuthView('login')} />

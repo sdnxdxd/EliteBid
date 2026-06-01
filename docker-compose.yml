@@ -1,0 +1,19 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: elitebid-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: elitebid
+      MYSQL_DATABASE: elitebid
+    ports:
+      - "3306:3306"
+    volumes:
+      - elitebid_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pelitebid"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  elitebid_mysql_data:

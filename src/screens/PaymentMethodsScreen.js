@@ -120,6 +120,9 @@ export default function PaymentMethodsScreen({ onAdd, onBack, onUserUpdated, use
             <Text style={styles.emptyCopy}>
               Necesitas al menos un medio de pago para poder pujar en subastas habilitadas.
             </Text>
+            <Pressable onPress={onAdd} style={styles.emptyButton}>
+              <Text style={styles.emptyButtonText}>Agregar metodo</Text>
+            </Pressable>
           </View>
         ) : (
           <ScrollView
@@ -314,6 +317,21 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 8,
     textAlign: 'center'
+  },
+  emptyButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.full,
+    height: 46,
+    justifyContent: 'center',
+    marginTop: 18,
+    paddingHorizontal: 22
+  },
+  emptyButtonText: {
+    color: colors.onPrimaryFixed,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   emptyState: {
     alignItems: 'center',

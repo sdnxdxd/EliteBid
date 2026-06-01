@@ -8,15 +8,20 @@ Requisitos:
 
 - Node.js 20.19 o superior
 - Expo SDK 54
+- MySQL 8.x o compatible, o Docker Desktop
 
 Comandos:
 
 ```bash
 npm install
+copy .env.example .env
+docker compose up -d mysql
+npm run db:init
+npm run api
 npm run web
 ```
 
-Expo abre una URL local. Si se quiere fijar puerto:
+`npm run api` levanta el backend en `http://127.0.0.1:3001/api`. En otra terminal, Expo abre una URL local. Si se quiere fijar puerto:
 
 ```bash
 npm run web -- --port 3002
@@ -42,6 +47,44 @@ Categoria: platino
 8. Entrar a `Perfil` y revisar estadisticas, foto y datos bloqueados.
 9. Entrar a `Penalidades`, pagar o marcar como solucionada.
 
+## Registro como invitado
+
+El registro inicial solicita nombre, apellido, documento, fotos, domicilio y email de verificacion. Al tocar `Continuar como invitado`, el backend crea una cuenta con `rol = invitado`, `email_verificado = no` y guarda un token de verificacion.
+
+El backend envia el mail de verificacion con una cuenta SMTP de la empresa usando Nodemailer. Configurar en `.env`:
+
+```text
+APP_PUBLIC_URL=http://127.0.0.1:3001
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_TIMEOUT_MS=15000
+MAIL_USER=sdnxdxd@gmail.com
+MAIL_PASSWORD=clave_o_app_password
+MAIL_FROM=EliteBid <sdnxdxd@gmail.com>
+MAIL_VERIFICATION_SUBJECT=Verifica tu cuenta en EliteBid
+```
+
+La casilla `verificacion@elitebid.com` debe existir en el proveedor elegido. Si es Gmail/Google Workspace, usar una app password, no la clave normal de la cuenta. Como alternativa se puede usar Resend:
+
+```text
+RESEND_API_KEY=tu_api_key_de_resend
+RESEND_FROM=EliteBid <onboarding@resend.dev>
+```
+
+Si no hay SMTP ni `RESEND_API_KEY`, el registro no falla: el backend deja la cuenta pendiente y muestra el token en consola para pruebas locales. Para reenviar el mail se puede llamar:
+
+```bash
+curl -X POST http://127.0.0.1:3001/api/auth/resend-verification -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\"}"
+```
+
+Mientras la cuenta este como invitada:
+
+- Solo ve subastas futuras.
+- No ve precios base ni pujas actuales.
+- No puede entrar a salas, pujar, guardar favoritos, agregar medios de pago, comprar ni modificar datos de perfil.
+- El pais queda fijo en Argentina.
+
 ## Entregables
 
 - Informe segunda entrega: [`INFORME_SEGUNDA_ENTREGA.md`](./INFORME_SEGUNDA_ENTREGA.md)
@@ -50,29 +93,77 @@ Categoria: platino
 
 ## Estado real del backend
 
-Esta version usa una capa de servicios local dentro de Expo:
+Esta version usa un backend Node.js + Express conectado a MySQL mediante `mysql2`.
 
-- Mobile: SQLite via `expo-sqlite`.
-- Web: adaptador `webDatabase.js` con persistencia en `localStorage`, para evitar bloqueos de Access Handles del navegador.
+- `server/index.js`: API REST.
+- `server/db.js`: pool de conexiones MySQL.
+- `server/schema.sql`: definicion de tablas.
+- `server/initDatabase.js`: crea la base, tablas y datos iniciales.
 
-No hay todavia un backend Express + TypeScript deployado ni JWT real firmado. La logica de negocio esta implementada localmente para demostrar el circuito integrado de la segunda entrega.
+La app Expo ya no abre SQLite: consume la API configurada con `EXPO_PUBLIC_API_URL`.
 
 ## Estructura principal
 
-- `src/backend/database.js`: esquema, seed inicial y conexion a la base.
-- `src/backend/webDatabase.js`: base persistente para web.
-- `src/backend/authService.js`: login, registro, sesion y recupero de clave.
-- `src/backend/auctionService.js`: subastas, sala, pujas, favoritos y compras.
-- `src/backend/paymentService.js`: medios de pago.
-- `src/backend/profileService.js`: perfil, foto, estadisticas y datos editables.
-- `src/backend/penaltyService.js`: penalidades y resolucion.
+- `server/*`: backend Express + MySQL.
+- `src/backend/apiClient.js`: cliente HTTP para la app Expo.
+- `src/backend/*Service.js`: wrappers de API usados por las pantallas.
 - `src/components/BottomNav.js`: barra inferior fija.
 - `src/components/AppToast.js`: popups/toasts reutilizables.
 - `src/screens/*`: pantallas mobile de la demo.
 
+## Como ver los datos guardados
+
+Entrar a MySQL:
+
+```bash
+mysql -h 127.0.0.1 -P 3307 -u root -p
+```
+
+En la instalacion local de esta maquina el puerto configurado es `3307`. Si usas el `docker-compose.yml` del repo, el puerto es `3306` y la clave es `elitebid`.
+
+Seleccionar la base:
+
+```sql
+USE elitebid;
+SHOW TABLES;
+```
+
+Ver datos iniciales:
+
+```sql
+SELECT id, email, cliente_id FROM usuarios;
+SELECT identificador, titulo, estado, categoria FROM subastas;
+SELECT identificador, cliente, tipo, monto_garantia, verificado FROM medios_pago;
+```
+
+Las claves no se guardan en texto plano. En `usuarios.password` vas a ver valores con formato `scrypt$...`, generados con salt por usuario.
+
+El backend tambien sanitiza y normaliza la entrada antes de guardar:
+
+- Emails: minusculas, sin espacios.
+- Nombres y apellidos: formato titulo, por ejemplo `santiago santiago` se guarda como `Santiago Santiago`.
+- Documento, tarjeta, CBU/CVU, CVV y cheques: solo digitos.
+- Domicilio, banco y titular: espacios colapsados y formato titulo.
+- Montos: numero decimal con dos posiciones como maximo.
+- Registro: el pais queda fijo en Argentina; no se muestran ni se guardan otros paises para usuarios nuevos.
+
+Despues de usar la app:
+
+```sql
+SELECT * FROM sesiones ORDER BY creado_en DESC;
+SELECT * FROM asistentes ORDER BY identificador DESC;
+SELECT * FROM pujos ORDER BY identificador DESC;
+SELECT * FROM favoritos ORDER BY creado_en DESC;
+SELECT * FROM registro_de_subasta ORDER BY identificador DESC;
+SELECT * FROM penalidades ORDER BY identificador DESC;
+```
+
+Tambien se puede usar MySQL Workbench o DBeaver conectando a `127.0.0.1:3307`, base `elitebid`.
+
 ## Validacion rapida
 
 ```bash
+npm run api
 npx expo export --platform web
 ```
 

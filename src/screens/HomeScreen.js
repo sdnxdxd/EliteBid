@@ -53,7 +53,7 @@ export default function HomeScreen({
 
   async function load() {
     const [auctions, userSummary, favorites] = await Promise.all([
-      getHomeAuctions(),
+      getHomeAuctions(user.clienteId),
       getUserSummary(user.clienteId),
       getFavoriteAuctionIds(user.clienteId)
     ]);
@@ -196,6 +196,8 @@ function MetricCard({ label, value }) {
 }
 
 function AuctionCard({ auction, isFavorite, onPress, onToggleFavorite }) {
+  const priceAvailable = auction.currentBid != null;
+
   return (
     <Pressable onPress={onPress} style={styles.auctionCard}>
       <View style={styles.cardImageWrap}>
@@ -227,14 +229,16 @@ function AuctionCard({ auction, isFavorite, onPress, onToggleFavorite }) {
         <Text numberOfLines={2} style={styles.cardTitle}>
           {auction.title}
         </Text>
-        <Text style={styles.cardLabel}>Puja actual</Text>
-        <Text style={styles.cardPrice}>{formatMoney(auction.currentBid)}</Text>
+        <Text style={styles.cardLabel}>{priceAvailable ? 'Puja actual' : 'Precio reservado'}</Text>
+        <Text style={styles.cardPrice}>{priceAvailable ? formatMoney(auction.currentBid) : 'Verificacion pendiente'}</Text>
       </View>
     </Pressable>
   );
 }
 
 function AuctionListItem({ auction, isFavorite, onPress, onToggleFavorite }) {
+  const priceAvailable = auction.basePrice != null;
+
   return (
     <Pressable onPress={onPress} style={styles.listItem}>
       <Image source={{ uri: auction.imageUrl }} style={styles.listImage} />
@@ -244,7 +248,7 @@ function AuctionListItem({ auction, isFavorite, onPress, onToggleFavorite }) {
           {auction.title}
         </Text>
         <Text style={styles.listEstimate}>
-          Base {formatMoney(auction.basePrice)}
+          {priceAvailable ? `Base ${formatMoney(auction.basePrice)}` : 'Precio reservado'}
         </Text>
       </View>
       <View style={styles.datePill}>
@@ -268,6 +272,8 @@ function AuctionListItem({ auction, isFavorite, onPress, onToggleFavorite }) {
 }
 
 function formatMoney(value) {
+  if (value == null) return 'Reservado';
+
   const amount = Number(value || 0).toLocaleString('es-AR', {
     maximumFractionDigits: 0
   });
