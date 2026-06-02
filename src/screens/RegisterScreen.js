@@ -18,13 +18,13 @@ import { registerUser } from '../backend/authService';
 import { colors, radii, shadows } from '../theme';
 
 const initialForm = {
+  email: '',
   firstName: '',
   lastName: '',
-  email: '',
+  documentType: 'dni',
   documentNumber: '',
   documentFrontUri: '',
-  documentBackUri: '',
-  legalAddress: ''
+  documentBackUri: ''
 };
 
 export default function RegisterScreen({ onBack, onRegistered }) {
@@ -62,13 +62,12 @@ export default function RegisterScreen({ onBack, onRegistered }) {
   async function submitGuest() {
     setError('');
     const required = [
+      ['email', 'Ingresa tu correo para verificar la cuenta.'],
       ['firstName', 'Ingresa tu nombre.'],
       ['lastName', 'Ingresa tu apellido.'],
-      ['email', 'Ingresa tu correo para verificar la cuenta.'],
       ['documentNumber', 'Ingresa tu documento.'],
       ['documentFrontUri', 'Carga la foto del frente del documento.'],
-      ['documentBackUri', 'Carga la foto del dorso del documento.'],
-      ['legalAddress', 'Ingresa tu domicilio legal.']
+      ['documentBackUri', 'Carga la foto del dorso del documento.']
     ];
 
     for (const [key, message] of required) {
@@ -112,7 +111,7 @@ export default function RegisterScreen({ onBack, onRegistered }) {
         <View style={styles.progressBlock}>
           <Text style={styles.progressLabel}>VERIFICACION DE CUENTA</Text>
           <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: '100%' }]} />
+          <View style={[styles.progressFill, { width: '100%' }]} />
           </View>
         </View>
 
@@ -159,38 +158,51 @@ function PersonalStep({ form, pickDocument, updateField }) {
       <View style={styles.verifiedBox}>
         <MaterialCommunityIcons color={colors.primaryContainer} name="email-fast-outline" size={26} />
         <Text style={styles.verifiedText}>
-          Te vamos a enviar la verificacion por email. Mientras tanto vas a entrar como invitado.
+          Te vamos a enviar un codigo de un solo uso por email. Mientras tanto vas a entrar como invitado.
         </Text>
-      </View>
-      <View style={styles.row}>
-        <Field
-          label="Nombre completo"
-          onChangeText={(value) => updateField('firstName', value)}
-          placeholder="Ej. Juan Carlos"
-          value={form.firstName}
-        />
-        <Field
-          label="Apellido"
-          onChangeText={(value) => updateField('lastName', value)}
-          placeholder="Ej. Perez"
-          value={form.lastName}
-        />
       </View>
 
       <Field
         autoCapitalize="none"
         keyboardType="email-address"
-        label="Correo de verificacion"
+        label="Mail"
         onChangeText={(value) => updateField('email', value)}
         placeholder="tu@email.com"
         value={form.email}
       />
 
       <Field
+        label="Nombre"
+        onChangeText={(value) => updateField('firstName', value)}
+        placeholder="Ej. Juan Carlos"
+        value={form.firstName}
+      />
+      <Field
+        label="Apellido"
+        onChangeText={(value) => updateField('lastName', value)}
+        placeholder="Ej. Perez"
+        value={form.lastName}
+      />
+
+      <Text style={styles.label}>Tipo de documento</Text>
+      <View style={styles.segmented}>
+        <Segment
+          active={form.documentType === 'dni'}
+          label="DNI"
+          onPress={() => updateField('documentType', 'dni')}
+        />
+        <Segment
+          active={form.documentType === 'pasaporte'}
+          label="Pasaporte"
+          onPress={() => updateField('documentType', 'pasaporte')}
+        />
+      </View>
+
+      <Field
         keyboardType="numeric"
-        label="Documento"
+        label={form.documentType === 'dni' ? 'DNI' : 'Pasaporte'}
         onChangeText={(value) => updateField('documentNumber', value)}
-        placeholder="DNI o pasaporte"
+        placeholder={form.documentType === 'dni' ? 'Numero de DNI' : 'Numero de pasaporte'}
         value={form.documentNumber}
       />
 
@@ -215,13 +227,15 @@ function PersonalStep({ form, pickDocument, updateField }) {
         </View>
       </View>
 
-      <Field
-        label="Domicilio legal"
-        onChangeText={(value) => updateField('legalAddress', value)}
-        placeholder="Calle, numero, ciudad, Argentina"
-        value={form.legalAddress}
-      />
     </>
+  );
+}
+
+function Segment({ active, label, onPress }) {
+  return (
+    <Pressable onPress={onPress} style={[styles.segment, active && styles.segmentActive]}>
+      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -407,6 +421,35 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: 12
+  },
+  segment: {
+    alignItems: 'center',
+    borderRadius: radii.full,
+    flex: 1,
+    height: 42,
+    justifyContent: 'center'
+  },
+  segmentActive: {
+    backgroundColor: colors.primaryContainer
+  },
+  segmented: {
+    backgroundColor: colors.surfaceHigh,
+    borderColor: 'rgba(72, 69, 81, 0.3)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 16,
+    padding: 4
+  },
+  segmentText: {
+    color: colors.onSurfaceVariant,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  segmentTextActive: {
+    color: colors.onPrimaryFixed
   },
   rule: {
     color: colors.onSurfaceVariant,

@@ -33,6 +33,15 @@ export async function resendVerificationEmail(email) {
   });
 }
 
+export async function completeVerification(payload) {
+  const user = await apiRequest('/auth/complete-verification', {
+    body: JSON.stringify(payload),
+    method: 'POST'
+  });
+  setSessionToken(user.sessionToken);
+  return user;
+}
+
 export async function signOut() {
   await apiRequest('/auth/session', { method: 'DELETE' });
   setSessionToken(null);

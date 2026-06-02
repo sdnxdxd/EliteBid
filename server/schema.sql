@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS paises (
 
 CREATE TABLE IF NOT EXISTS personas (
   identificador INT AUTO_INCREMENT PRIMARY KEY,
+  tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni',
   documento VARCHAR(40) NOT NULL,
   nombre VARCHAR(160) NOT NULL,
   direccion VARCHAR(255),
@@ -174,9 +175,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
   password VARCHAR(255) NOT NULL,
   nombre VARCHAR(120) NOT NULL,
   rol ENUM('invitado', 'cliente', 'admin') DEFAULT 'cliente',
-  estado ENUM('activo', 'bloqueado') DEFAULT 'activo',
+  estado ENUM('pendiente', 'activo', 'bloqueado') DEFAULT 'activo',
   email_verificado ENUM('si', 'no') DEFAULT 'no',
   verification_token VARCHAR(180),
+  verification_code_hash VARCHAR(255),
+  verification_code_expires_at DATETIME,
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_usuarios_cliente FOREIGN KEY (cliente_id) REFERENCES clientes (identificador)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -5,7 +5,7 @@ require('dotenv').config();
 
 const defaultCompanyEmail = 'verificacion@elitebid.com';
 const defaultFrom = `EliteBid <${defaultCompanyEmail}>`;
-const defaultSubject = 'Verifica tu cuenta en EliteBid';
+const defaultSubject = 'Tu codigo de verificacion EliteBid';
 
 function buildVerificationUrl(token) {
   const baseUrl = String(process.env.APP_PUBLIC_URL || `http://127.0.0.1:${process.env.API_PORT || 3001}`).replace(/\/$/, '');
@@ -13,8 +13,7 @@ function buildVerificationUrl(token) {
 }
 
 async function sendVerificationEmail({ to, name, token }) {
-  const verificationUrl = buildVerificationUrl(token);
-  const content = buildVerificationContent({ name, verificationUrl });
+  const content = buildVerificationContent({ name, code: token });
 
   if (hasSmtpConfig()) {
     const transporter = nodemailer.createTransport({
@@ -71,28 +70,25 @@ function hasSmtpConfig() {
   return Boolean(process.env.SMTP_HOST && process.env.MAIL_USER && process.env.MAIL_PASSWORD);
 }
 
-function buildVerificationContent({ name, verificationUrl }) {
+function buildVerificationContent({ name, code }) {
   const firstName = escapeHtml(name || 'tu cuenta');
+  const safeCode = escapeHtml(code);
 
   return {
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
-        <h1 style="font-size: 22px;">Verifica tu cuenta EliteBid</h1>
+        <h1 style="font-size: 22px;">Codigo de verificacion EliteBid</h1>
         <p>Hola ${firstName}, ya creamos tu cuenta como invitado.</p>
-        <p>Para ver precios, agregar medios de pago y participar en subastas, verifica tu email.</p>
-        <p>
-          <a href="${verificationUrl}" style="background: #111827; color: #ffffff; padding: 12px 18px; border-radius: 6px; text-decoration: none; display: inline-block;">
-            Verificar cuenta
-          </a>
-        </p>
-        <p>Si el boton no funciona, copia y pega este enlace en el navegador:</p>
-        <p><a href="${verificationUrl}">${verificationUrl}</a></p>
+        <p>Usa este codigo de un solo uso en EliteBid para crear tu contrasena definitiva y verificar la cuenta.</p>
+        <p style="font-size: 30px; font-weight: 800; letter-spacing: 6px; margin: 24px 0;">${safeCode}</p>
+        <p>El codigo vence en 15 minutos. Si no lo pediste, podes ignorar este mensaje.</p>
       </div>
     `,
     text: [
       `Hola ${name || ''}, ya creamos tu cuenta como invitado en EliteBid.`,
-      'Para ver precios, agregar medios de pago y participar en subastas, verifica tu email.',
-      `Verificar cuenta: ${verificationUrl}`
+      'Usa este codigo de un solo uso para crear tu contrasena definitiva y verificar la cuenta.',
+      `Codigo: ${code}`,
+      'El codigo vence en 15 minutos.'
     ].join('\n\n')
   };
 }

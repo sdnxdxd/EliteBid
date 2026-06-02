@@ -56,13 +56,13 @@ El backend envia el mail de verificacion con una cuenta SMTP de la empresa usand
 ```text
 APP_PUBLIC_URL=http://127.0.0.1:3001
 SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_SECURE=false
+SMTP_PORT=465
+SMTP_SECURE=true
 SMTP_TIMEOUT_MS=15000
 MAIL_USER=sdnxdxd@gmail.com
 MAIL_PASSWORD=clave_o_app_password
 MAIL_FROM=EliteBid <sdnxdxd@gmail.com>
-MAIL_VERIFICATION_SUBJECT=Verifica tu cuenta en EliteBid
+MAIL_VERIFICATION_SUBJECT=Tu codigo de verificacion EliteBid
 ```
 
 La casilla `verificacion@elitebid.com` debe existir en el proveedor elegido. Si es Gmail/Google Workspace, usar una app password, no la clave normal de la cuenta. Como alternativa se puede usar Resend:
@@ -72,7 +72,7 @@ RESEND_API_KEY=tu_api_key_de_resend
 RESEND_FROM=EliteBid <onboarding@resend.dev>
 ```
 
-Si no hay SMTP ni `RESEND_API_KEY`, el registro no falla: el backend deja la cuenta pendiente y muestra el token en consola para pruebas locales. Para reenviar el mail se puede llamar:
+Si no hay SMTP ni `RESEND_API_KEY`, el registro no falla: el backend deja la cuenta pendiente y muestra el codigo en consola para pruebas locales. Para reenviar el mail se puede llamar:
 
 ```bash
 curl -X POST http://127.0.0.1:3001/api/auth/resend-verification -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\"}"
@@ -83,10 +83,12 @@ Mientras la cuenta este como invitada:
 - Solo ve subastas futuras.
 - No ve precios base ni pujas actuales.
 - No puede entrar a salas, pujar, guardar favoritos, agregar medios de pago, comprar ni modificar datos de perfil.
+- Puede cargar el codigo de un solo uso desde `Perfil`, crear una contrasena definitiva y pasar a `cliente`.
 - El pais queda fijo en Argentina.
 
 ## Entregables
 
+- Guia para correr y explicar la entrega: [`GUIA_SEGUNDA_ENTREGA.md`](./GUIA_SEGUNDA_ENTREGA.md)
 - Informe segunda entrega: [`INFORME_SEGUNDA_ENTREGA.md`](./INFORME_SEGUNDA_ENTREGA.md)
 - Checklist QA con capturas: [`QA_CHECKLIST_SEGUNDA_ENTREGA.md`](./QA_CHECKLIST_SEGUNDA_ENTREGA.md)
 - Rama de GitHub usada para compartir: `informe-segunda-entrega`

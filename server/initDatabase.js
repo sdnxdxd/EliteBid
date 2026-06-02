@@ -21,7 +21,14 @@ async function initDatabase() {
 
 async function migrateSecuritySchema() {
   await run("ALTER TABLE usuarios MODIFY rol ENUM('invitado', 'cliente', 'admin') DEFAULT 'cliente'");
+  await run("ALTER TABLE usuarios MODIFY estado ENUM('pendiente', 'activo', 'bloqueado') DEFAULT 'activo'");
   await run('ALTER TABLE usuarios MODIFY password VARCHAR(255) NOT NULL');
+  await addColumnIfMissing(
+    'personas',
+    'tipo_documento',
+    "ALTER TABLE personas ADD COLUMN tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni' AFTER identificador"
+  );
+  await run("ALTER TABLE personas MODIFY tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni'");
   await addColumnIfMissing(
     'usuarios',
     'email_verificado',
@@ -31,6 +38,16 @@ async function migrateSecuritySchema() {
     'usuarios',
     'verification_token',
     'ALTER TABLE usuarios ADD COLUMN verification_token VARCHAR(180)'
+  );
+  await addColumnIfMissing(
+    'usuarios',
+    'verification_code_hash',
+    'ALTER TABLE usuarios ADD COLUMN verification_code_hash VARCHAR(255)'
+  );
+  await addColumnIfMissing(
+    'usuarios',
+    'verification_code_expires_at',
+    'ALTER TABLE usuarios ADD COLUMN verification_code_expires_at DATETIME'
   );
 
   const legacyUsers = await query(

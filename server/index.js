@@ -109,9 +109,9 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
 
   const fullName = `${form.firstName} ${form.lastName}`.trim();
   const personResult = await run(
-    `INSERT INTO personas (documento, nombre, direccion, estado, foto_uri)
-     VALUES (?, ?, ?, ?, ?)`,
-    [form.documentNumber, fullName, form.legalAddress, 'activo', form.documentFrontUri]
+    `INSERT INTO personas (tipo_documento, documento, nombre, direccion, estado, foto_uri)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [form.documentType, form.documentNumber, fullName, form.legalAddress, 'activo', form.documentFrontUri]
   );
   const personId = personResult.insertId;
 
@@ -126,19 +126,20 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
     [personId, 32, 'si', 'comun', 2]
   );
 
-  const verificationToken = createToken();
+  const verificationCode = createOneTimeCode();
   await run(
-    `INSERT INTO usuarios (cliente_id, email, password, nombre, rol, estado, email_verificado, verification_token)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO usuarios (cliente_id, email, password, nombre, rol, estado, email_verificado, verification_code_hash, verification_code_expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       personId,
       form.email,
       await hashPassword(createToken()),
       form.firstName,
       'invitado',
-      'activo',
+      'pendiente',
       'no',
-      verificationToken
+      await hashPassword(verificationCode),
+      toMysqlDateTime(new Date(Date.now() + 15 * 60 * 1000))
     ]
   );
 
@@ -160,7 +161,7 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
   const emailResult = await sendVerificationForUser({
     email: form.email,
     name: form.firstName,
-    token: verificationToken
+    token: verificationCode
   });
 
   res.json({
@@ -175,9 +176,9 @@ app.post('/api/auth/resend-verification', wrap(async (req, res) => {
   if (!email) throw new Error('Ingresa un correo valido.');
 
   const user = await first(
-    `SELECT id, email, nombre, verification_token AS verificationToken
+    `SELECT id, email, nombre
      FROM usuarios
-     WHERE lower(email) = ? AND rol = 'invitado' AND email_verificado = 'no'
+     WHERE lower(email) = ? AND rol = 'invitado' AND email_verificado = 'no' AND estado = 'pendiente'
      LIMIT 1`,
     [email]
   );
@@ -186,18 +187,74 @@ app.post('/api/auth/resend-verification', wrap(async (req, res) => {
     return res.json({ ok: true, verificationEmailSent: false });
   }
 
-  const verificationToken = user.verificationToken || createToken();
-  if (!user.verificationToken) {
-    await run('UPDATE usuarios SET verification_token = ? WHERE id = ?', [verificationToken, user.id]);
-  }
+  const verificationCode = createOneTimeCode();
+  await run(
+    'UPDATE usuarios SET verification_code_hash = ?, verification_code_expires_at = ? WHERE id = ?',
+    [await hashPassword(verificationCode), toMysqlDateTime(new Date(Date.now() + 15 * 60 * 1000)), user.id]
+  );
 
   const emailResult = await sendVerificationForUser({
     email: user.email,
     name: user.nombre,
-    token: verificationToken
+    token: verificationCode
   });
 
   res.json({ ok: true, verificationEmailSent: emailResult.sent });
+}));
+
+app.post('/api/auth/complete-verification', wrap(async (req, res) => {
+  const token = bearerToken(req);
+  const email = normalizeEmail(req.body.email);
+  const code = normalizeOneTimeCode(req.body.code);
+  validatePassword(req.body.password, req.body.confirmPassword);
+
+  if (!email || !code) throw new Error('Ingresa el correo y codigo de verificacion.');
+
+  const user = await first(
+    `SELECT u.id, u.email, u.nombre, u.rol, u.estado, u.password, u.verification_code_hash AS verificationCodeHash,
+      u.verification_code_expires_at AS verificationCodeExpiresAt, u.cliente_id AS clienteId, c.categoria, c.admitido,
+      (SELECT COUNT(*) FROM medios_pago mp WHERE mp.cliente = u.cliente_id) AS paymentCount
+     FROM usuarios u
+     JOIN clientes c ON c.identificador = u.cliente_id
+     WHERE lower(u.email) = ? AND u.rol = 'invitado' AND u.email_verificado = 'no'
+     LIMIT 1`,
+    [email]
+  );
+
+  if (!user) throw new Error('No encontramos una cuenta pendiente con ese correo.');
+  if (user.estado !== 'pendiente') throw new Error('La cuenta ya no esta pendiente.');
+  if (!user.verificationCodeHash) throw new Error('Solicita un nuevo codigo de verificacion.');
+  if (new Date(user.verificationCodeExpiresAt).getTime() < Date.now()) {
+    throw new Error('El codigo vencio. Solicita uno nuevo.');
+  }
+
+  const codeResult = await verifyPassword(code, user.verificationCodeHash);
+  if (!codeResult.ok) throw new Error('El codigo ingresado no es correcto.');
+
+  await run(
+    `UPDATE usuarios
+     SET password = ?, email_verificado = 'si', rol = 'cliente', estado = 'activo',
+       verification_token = NULL, verification_code_hash = NULL, verification_code_expires_at = NULL
+     WHERE id = ?`,
+    [await hashPassword(req.body.password), user.id]
+  );
+
+  const sessionToken = token || createToken();
+  if (token) {
+    await run('UPDATE sesiones SET expira_en = ? WHERE token = ? AND usuario_id = ?', [
+      toMysqlDateTime(new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000)),
+      token,
+      user.id
+    ]);
+  } else {
+    await run('INSERT INTO sesiones (token, usuario_id, expira_en) VALUES (?, ?, ?)', [
+      sessionToken,
+      user.id,
+      toMysqlDateTime(new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000))
+    ]);
+  }
+
+  res.json(toSessionUser({ ...user, rol: 'cliente', estado: 'activo' }, sessionToken));
 }));
 
 app.get('/api/auth/verify-email', wrap(async (req, res) => {
@@ -242,7 +299,9 @@ app.get('/api/auth/session', wrap(async (req, res) => {
     [token]
   );
 
-  if (!session || session.estado !== 'activo' || session.admitido !== 'si') return res.json(null);
+  if (!session) return res.json(null);
+  const pendingGuest = session.rol === 'invitado' && session.estado === 'pendiente';
+  if ((session.estado !== 'activo' && !pendingGuest) || session.admitido !== 'si') return res.json(null);
   res.json(session);
 }));
 
@@ -853,6 +912,10 @@ function createToken() {
   return `elite-${crypto.randomBytes(32).toString('hex')}`;
 }
 
+function createOneTimeCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
 function toMysqlDateTime(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
@@ -899,7 +962,6 @@ function sanitizeGuestRegistration(form) {
     ['documentNumber', 'Ingresa tu documento.'],
     ['documentFrontUri', 'Carga la foto del frente del documento.'],
     ['documentBackUri', 'Carga la foto del dorso del documento.'],
-    ['legalAddress', 'Ingresa tu domicilio legal.'],
     ['email', 'Ingresa tu correo para verificar tu cuenta.']
   ];
 
@@ -910,12 +972,13 @@ function sanitizeGuestRegistration(form) {
   const sanitized = {
     firstName: normalizePersonName(form.firstName, 'Ingresa un nombre valido.'),
     lastName: normalizePersonName(form.lastName, 'Ingresa un apellido valido.'),
-    documentNumber: normalizeDocument(form.documentNumber),
+    documentType: normalizeDocumentType(form.documentType),
     documentFrontUri: sanitizeUri(form.documentFrontUri, 'Carga la foto del frente del documento.'),
     documentBackUri: sanitizeUri(form.documentBackUri, 'Carga la foto del dorso del documento.'),
-    legalAddress: normalizeAddress(form.legalAddress),
+    legalAddress: form.legalAddress ? normalizeAddress(form.legalAddress) : 'Pendiente De Completar',
     email: normalizeEmail(form.email)
   };
+  sanitized.documentNumber = normalizeIdentityDocument(form.documentNumber, sanitized.documentType);
 
   if (!sanitized.email) throw new Error('Ingresa un correo valido.');
 
@@ -1117,6 +1180,28 @@ function normalizeDocument(value = '') {
   }
 
   return documentNumber;
+}
+
+function normalizeIdentityDocument(value = '', type = 'dni') {
+  if (type === 'pasaporte') {
+    const passport = normalizeWhitespace(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (passport.length < 6 || passport.length > 20) {
+      throw new Error('Ingresa un pasaporte valido.');
+    }
+    return passport;
+  }
+
+  return normalizeDocument(value);
+}
+
+function normalizeDocumentType(value = '') {
+  const type = normalizeWhitespace(value).toLowerCase();
+  return type === 'pasaporte' ? 'pasaporte' : 'dni';
+}
+
+function normalizeOneTimeCode(value = '') {
+  const code = onlyDigits(value);
+  return /^\d{6}$/.test(code) ? code : '';
 }
 
 function normalizePersonName(value = '', message = 'Ingresa un nombre valido.') {
