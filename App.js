@@ -68,7 +68,7 @@ export default function App() {
   function handleAuthenticated(sessionUser, nextView = 'home') {
     setUser(sessionUser);
     setAuthView('login');
-    setAppView(nextView);
+    setAppView(sessionUser?.rol === 'invitado' && sessionUser?.estado === 'pendiente' ? 'verifyAccount' : nextView);
   }
 
   function openPayments(fromView) {

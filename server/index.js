@@ -33,6 +33,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
 
   const user = await first(
     `SELECT u.id, u.email, u.password, u.nombre, u.rol, u.estado, u.cliente_id AS clienteId,
+      u.verification_code_hash AS verificationCodeHash, u.verification_code_expires_at AS verificationCodeExpiresAt,
       c.categoria, c.admitido,
       (SELECT COUNT(*) FROM medios_pago mp WHERE mp.cliente = u.cliente_id) AS paymentCount
      FROM usuarios u
@@ -41,15 +42,19 @@ app.post('/api/auth/login', wrap(async (req, res) => {
     [normalizedEmail]
   );
 
-  const passwordResult = user ? await verifyPassword(password, user.password) : { ok: false };
-
-  if (!user || !passwordResult.ok) throw new Error('Correo o clave incorrectos.');
-  if (user.estado !== 'activo' || user.admitido !== 'si') {
-    throw new Error('Tu usuario aun no esta habilitado para ingresar.');
+  if (!user) throw new Error('Correo o clave incorrectos.');
+  if (user.rol === 'invitado' && user.estado === 'pendiente') {
+    await assertPendingGuestCode(user, password);
+  } else {
+    const passwordResult = await verifyPassword(password, user.password);
+    if (!passwordResult.ok) throw new Error('Correo o clave incorrectos.');
+    if (passwordResult.needsRehash) {
+      await run('UPDATE usuarios SET password = ? WHERE id = ?', [await hashPassword(password), user.id]);
+    }
   }
 
-  if (passwordResult.needsRehash) {
-    await run('UPDATE usuarios SET password = ? WHERE id = ?', [await hashPassword(password), user.id]);
+  if (!['activo', 'pendiente'].includes(user.estado) || user.admitido !== 'si') {
+    throw new Error('Tu usuario aun no esta habilitado para ingresar.');
   }
 
   const token = createToken();
@@ -842,6 +847,18 @@ async function sendVerificationForUser({ email, name, token }) {
   }
 }
 
+async function assertPendingGuestCode(user, codeValue) {
+  const code = normalizeOneTimeCode(codeValue);
+  if (!code) throw new Error('Ingresa el codigo de un solo uso para volver a entrar.');
+  if (!user.verificationCodeHash) throw new Error('Solicita un nuevo codigo de verificacion.');
+  if (new Date(user.verificationCodeExpiresAt).getTime() < Date.now()) {
+    throw new Error('El codigo vencio. Solicita uno nuevo.');
+  }
+
+  const codeResult = await verifyPassword(code, user.verificationCodeHash);
+  if (!codeResult.ok) throw new Error('El codigo ingresado no es correcto.');
+}
+
 function normalizeToken(value = '') {
   const token = normalizeWhitespace(value);
   return /^[A-Za-z0-9._:-]{20,220}$/.test(token) ? token : '';
@@ -962,9 +979,11 @@ function sanitizeGuestRegistration(form) {
     ['lastName', 'Ingresa tu apellido.'],
     ['documentNumber', 'Ingresa tu documento.'],
     ['documentFrontUri', 'Carga la foto del frente del documento.'],
-    ['documentBackUri', 'Carga la foto del dorso del documento.'],
     ['email', 'Ingresa tu correo para verificar tu cuenta.']
   ];
+  if (normalizeDocumentType(form.documentType) === 'dni') {
+    required.push(['documentBackUri', 'Carga la foto del dorso del documento.']);
+  }
 
   for (const [key, message] of required) {
     if (!String(form[key] ?? '').trim()) throw new Error(message);
@@ -975,11 +994,14 @@ function sanitizeGuestRegistration(form) {
     lastName: normalizePersonName(form.lastName, 'Ingresa un apellido valido.'),
     documentType: normalizeDocumentType(form.documentType),
     documentFrontUri: sanitizeUri(form.documentFrontUri, 'Carga la foto del frente del documento.'),
-    documentBackUri: sanitizeUri(form.documentBackUri, 'Carga la foto del dorso del documento.'),
     legalAddress: form.legalAddress ? normalizeAddress(form.legalAddress) : 'Pendiente De Completar',
     email: normalizeEmail(form.email)
   };
   sanitized.documentNumber = normalizeIdentityDocument(form.documentNumber, sanitized.documentType);
+  sanitized.documentBackUri =
+    sanitized.documentType === 'dni'
+      ? sanitizeUri(form.documentBackUri, 'Carga la foto del dorso del documento.')
+      : sanitized.documentFrontUri;
 
   if (!sanitized.email) throw new Error('Ingresa un correo valido.');
 

@@ -123,7 +123,7 @@ Este usuario ya esta verificado y tiene permisos completos.
    - Nombre.
    - Apellido.
    - DNI o Pasaporte.
-   - Fotos frente y dorso del documento.
+   - Fotos del documento.
 3. Confirmar.
 4. La cuenta se crea como:
    - `rol = invitado`
@@ -143,6 +143,12 @@ Mientras es invitado:
 - No puede guardar favoritos.
 - No puede agregar medios de pago.
 - No puede modificar perfil.
+
+Documentacion requerida:
+
+- Si selecciona `DNI`, se pide foto del frente y dorso.
+- Si selecciona `Pasaporte`, se pide una sola foto de la pagina principal.
+- Si el invitado cierra sesion antes de confirmar la cuenta, puede volver a iniciar sesion usando su mail y el codigo de un solo uso como clave.
 
 ### Verificacion por codigo
 
@@ -165,6 +171,15 @@ Mientras es invitado:
 Si el usuario saltea esa pantalla, puede hacer lo mismo despues desde `Perfil`, en el panel `Cuenta pendiente`.
 
 El codigo vence a los 15 minutos. Si vence, el usuario puede tocar `Reenviar codigo`.
+
+Si el usuario cierra sesion antes de confirmar, puede volver al sistema desde Login:
+
+```text
+Correo: mail usado en el registro
+Clave o codigo: codigo de un solo uso recibido por mail
+```
+
+Luego vuelve a la pantalla de verificacion para crear la contrasena definitiva.
 
 ### Agregar medio de pago
 

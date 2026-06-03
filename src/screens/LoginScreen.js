@@ -57,7 +57,9 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
 
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Iniciar sesion</Text>
-          <Text style={styles.panelCopy}>Ingresa para acceder a tus subastas habilitadas.</Text>
+          <Text style={styles.panelCopy}>
+            Ingresa con tu clave. Si tu cuenta esta pendiente, usa el codigo de un solo uso como clave.
+          </Text>
 
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Correo</Text>
@@ -74,10 +76,10 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
           </View>
 
           <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Clave</Text>
+            <Text style={styles.label}>Clave o codigo</Text>
             <TextInput
               onChangeText={setPassword}
-              placeholder="********"
+              placeholder="Clave o codigo de 6 digitos"
               placeholderTextColor="rgba(201, 196, 211, 0.55)"
               secureTextEntry
               style={styles.input}

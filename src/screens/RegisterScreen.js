@@ -33,7 +33,11 @@ export default function RegisterScreen({ onBack, onRegistered }) {
   const [loading, setLoading] = useState(false);
 
   function updateField(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === 'documentType' && value === 'pasaporte' ? { documentBackUri: '' } : {})
+    }));
   }
 
   async function pickDocument(side) {
@@ -66,9 +70,11 @@ export default function RegisterScreen({ onBack, onRegistered }) {
       ['firstName', 'Ingresa tu nombre.'],
       ['lastName', 'Ingresa tu apellido.'],
       ['documentNumber', 'Ingresa tu documento.'],
-      ['documentFrontUri', 'Carga la foto del frente del documento.'],
-      ['documentBackUri', 'Carga la foto del dorso del documento.']
+      ['documentFrontUri', 'Carga la foto del frente del documento.']
     ];
+    if (form.documentType === 'dni') {
+      required.push(['documentBackUri', 'Carga la foto del dorso del documento.']);
+    }
 
     for (const [key, message] of required) {
       if (!String(form[key] ?? '').trim()) {
@@ -209,21 +215,27 @@ function PersonalStep({ form, pickDocument, updateField }) {
       <View style={styles.documentSection}>
         <View>
           <Text style={styles.groupTitle}>Documento de identidad</Text>
-          <Text style={styles.groupCopy}>Sube una foto clara del frente y dorso.</Text>
+          <Text style={styles.groupCopy}>
+            {form.documentType === 'dni'
+              ? 'Sube una foto clara del frente y dorso.'
+              : 'Sube una foto clara de la pagina principal del pasaporte.'}
+          </Text>
         </View>
         <View style={styles.documentRow}>
           <DocumentButton
             done={Boolean(form.documentFrontUri)}
             icon="badge-account-horizontal-outline"
-            label="Frente"
+            label={form.documentType === 'dni' ? 'Frente' : 'Pasaporte'}
             onPress={() => pickDocument('frente')}
           />
-          <DocumentButton
-            done={Boolean(form.documentBackUri)}
-            icon="credit-card-outline"
-            label="Dorso"
-            onPress={() => pickDocument('dorso')}
-          />
+          {form.documentType === 'dni' ? (
+            <DocumentButton
+              done={Boolean(form.documentBackUri)}
+              icon="credit-card-outline"
+              label="Dorso"
+              onPress={() => pickDocument('dorso')}
+            />
+          ) : null}
         </View>
       </View>
 
