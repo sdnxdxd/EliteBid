@@ -203,6 +203,20 @@ Con usuario verificado:
 6. Guardar favoritos.
 7. Ver compras y penalidades.
 
+### Notificaciones
+
+Desde la campana ubicada arriba a la derecha se abre la pantalla de notificaciones.
+
+La app muestra avisos accionables, por ejemplo:
+
+- Verificar cuenta pendiente.
+- Agregar medio de pago.
+- Resolver penalidades.
+- Ver subastas futuras.
+- Revisar estado de una venta/lote.
+
+Cada notificacion tiene un boton de accion que lleva al flujo correspondiente.
+
 ## 7. Como ver datos en MySQL Workbench
 
 Conectar a:
@@ -528,6 +542,7 @@ npx expo export --platform web
 | Solicitud de venta de bienes | `PurchasesScreen`, `/api/solicitudes-venta`, `solicitudes_lotes` | Completo para carga y seguimiento inicial |
 | Metricas de usuario | `HomeScreen`, `ProfileScreen`, `/api/users/:id/summary` | Completo |
 | Categorias de usuario | Perfil, modal de categoria, `categoryRequirements` | Completo para explicar ascenso |
+| Notificaciones accionables | Campana superior, `NotificationsScreen`, `/api/notificaciones` | Completo para segunda entrega |
 
 ## 16. Categorias y acceso
 
@@ -581,6 +596,8 @@ En Perfil, tocando la insignia de categoria, se ve:
 | `GET` | `/api/usuarios/me/medios-de-pago` | Lista medios de pago |
 | `POST` | `/api/usuarios/me/medios-de-pago` | Crea medio de pago |
 | `GET` | `/api/users/:clienteId/summary` | Metricas y categoria |
+| `GET` | `/api/notificaciones` | Lista notificaciones accionables |
+| `POST` | `/api/notificaciones/:notificationId/accion` | Ejecuta accion de notificacion |
 | `POST` | `/api/solicitudes-venta` | Solicitud de venta de lote |
 
 ## 18. QA ejecutado

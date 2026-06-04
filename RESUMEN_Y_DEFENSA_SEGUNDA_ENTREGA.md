@@ -61,6 +61,9 @@
 - Se agrego una pantalla clara de verificacion de cuenta.
 - Se agrego fallback de verificacion en Perfil.
 - Se cambio visualmente el campo de mail en registro.
+- Se agrego una campana de notificaciones arriba a la derecha.
+- Se agrego una pantalla de notificaciones accionables.
+- Las notificaciones pueden llevar a verificar cuenta, agregar pago, resolver penalidades, revisar subastas o revisar ventas.
 - Se agrego en Perfil una insignia de categoria tocable.
 - Al tocar la categoria se abre un modal con:
   - Categoria actual.
@@ -151,6 +154,7 @@ alejandro@elitebid.com / Elite1234
 - Compras y penalidades como flujo parcial.
 - Solicitud de venta de lotes con 6 fotos.
 - Perfil con categoria y progreso.
+- Notificaciones accionables.
 - Documentacion de endpoints, SQL y QA.
 
 ## 4. Que esta parcial pero defendible

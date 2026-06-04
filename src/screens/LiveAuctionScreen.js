@@ -17,7 +17,7 @@ import AppToast from '../components/AppToast';
 import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import { colors, radii } from '../theme';
 
-export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user }) {
+export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpenNotifications, user }) {
   const [auction, setAuction] = useState(null);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(true);
@@ -168,9 +168,9 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, user 
             <Text style={styles.liveBadgeText}>En vivo</Text>
           </View>
         </View>
-        <View style={styles.iconButton}>
+        <Pressable onPress={onOpenNotifications} style={styles.iconButton}>
           <MaterialCommunityIcons color={colors.primary} name="bell-outline" size={24} />
-        </View>
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

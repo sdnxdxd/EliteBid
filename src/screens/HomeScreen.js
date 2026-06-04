@@ -35,6 +35,7 @@ export default function HomeScreen({
   onNavigate,
   onOpenAuctionDetail,
   onOpenAuctions,
+  onOpenNotifications,
   onSignOut
 }) {
   const [liveAuctions, setLiveAuctions] = useState([]);
@@ -101,9 +102,14 @@ export default function HomeScreen({
         <View style={styles.header}>
           <View style={styles.headerSpacer} />
           <Text style={styles.logo}>Elite Bid</Text>
-          <Pressable onPress={onSignOut} style={styles.iconButton}>
-            <MaterialCommunityIcons color={colors.onSurfaceVariant} name="logout" size={22} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable onPress={onOpenNotifications} style={styles.iconButton}>
+              <MaterialCommunityIcons color={colors.primary} name="bell-outline" size={22} />
+            </Pressable>
+            <Pressable onPress={onSignOut} style={styles.iconButton}>
+              <MaterialCommunityIcons color={colors.onSurfaceVariant} name="logout" size={22} />
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.greetingRow}>
@@ -411,6 +417,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between'
+  },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4
   },
   horizontalContent: {
     paddingBottom: 10,

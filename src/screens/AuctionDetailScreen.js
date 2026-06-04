@@ -16,7 +16,7 @@ const categoryLabel = {
   platino: 'Platino'
 };
 
-export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, onNavigate, user }) {
+export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, onNavigate, onOpenNotifications, user }) {
   const [auction, setAuction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
@@ -131,9 +131,9 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <Text style={styles.logo}>Detalle</Text>
-        <View style={styles.iconButton}>
-          <MaterialCommunityIcons color={colors.primary} name="gavel" size={24} />
-        </View>
+        <Pressable onPress={onOpenNotifications} style={styles.iconButton}>
+          <MaterialCommunityIcons color={colors.primary} name="bell-outline" size={24} />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

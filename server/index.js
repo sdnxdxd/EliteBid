@@ -536,8 +536,23 @@ app.get('/api/usuarios/me/metricas', wrap(async (req, res) => {
 }));
 
 app.get('/api/notificaciones', wrap(async (req, res) => {
-  await requireAuthenticatedClient(req);
-  res.json([]);
+  const viewer = await requireAuthenticatedClient(req);
+  res.json(await getUserNotifications(viewer));
+}));
+
+app.post('/api/notificaciones/:notificationId/accion', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const notifications = await getUserNotifications(viewer);
+  const notification = notifications.find((item) => item.id === req.params.notificationId);
+
+  if (!notification) throw new Error('No encontramos esa notificacion.');
+
+  res.json({
+    ok: true,
+    action: notification.action,
+    target: notification.target,
+    title: notification.title
+  });
 }));
 
 app.post('/api/uploads', wrap(async (req, res) => {
@@ -1094,6 +1109,124 @@ async function getUserPayments(clienteId) {
     [clienteId]
   );
   return rows.map((row) => ({ ...row, parsedDetail: parseDetail(row.detail) }));
+}
+
+async function getUserNotifications(viewer) {
+  const notifications = [];
+  const guest = viewer.rol === 'invitado';
+
+  if (guest) {
+    notifications.push({
+      id: 'verify-account',
+      action: 'verify_account',
+      createdAt: new Date().toISOString(),
+      description: 'Ingresa el codigo de un solo uso para activar precios, pagos y pujas.',
+      priority: 'alta',
+      read: false,
+      target: 'verifyAccount',
+      title: 'Verifica tu cuenta'
+    });
+  }
+
+  const activePenalties = await first(
+    `SELECT COUNT(*) AS total, COALESCE(SUM(importe), 0) AS amount
+     FROM penalidades
+     WHERE cliente = ? AND estado IN ('activa', 'vencida')`,
+    [viewer.clienteId]
+  );
+
+  if (Number(activePenalties?.total || 0) > 0) {
+    notifications.push({
+      id: 'active-penalties',
+      action: 'open_penalties',
+      createdAt: new Date().toISOString(),
+      description: `Tenes ${activePenalties.total} penalidad pendiente por ${formatMoney(activePenalties.amount)}.`,
+      priority: 'alta',
+      read: false,
+      target: 'penalties',
+      title: 'Penalidades pendientes'
+    });
+  }
+
+  if (!guest) {
+    const payment = await first(
+      `SELECT COUNT(*) AS total
+       FROM medios_pago
+       WHERE cliente = ? AND verificado = 'si'`,
+      [viewer.clienteId]
+    );
+
+    if (Number(payment?.total || 0) === 0) {
+      notifications.push({
+        id: 'add-payment',
+        action: 'add_payment',
+        createdAt: new Date().toISOString(),
+        description: 'Necesitas al menos un medio de pago verificado para entrar a salas y pujar.',
+        priority: 'media',
+        read: false,
+        target: 'payments',
+        title: 'Agrega un medio de pago'
+      });
+    }
+  }
+
+  const upcoming = await first(
+    `SELECT s.identificador AS id, s.titulo AS title, DATE_FORMAT(s.fecha, '%Y-%m-%d') AS date, s.categoria AS category
+     FROM subastas s
+     WHERE s.estado = 'programada'
+     ORDER BY s.fecha ASC, s.hora ASC
+     LIMIT 1`
+  );
+
+  if (upcoming) {
+    notifications.push({
+      id: `upcoming-auction-${upcoming.id}`,
+      action: guest ? 'open_auctions' : 'open_auction',
+      createdAt: new Date().toISOString(),
+      description: `${upcoming.title} esta programada para ${upcoming.date}. Categoria ${upcoming.category}.`,
+      priority: 'baja',
+      read: true,
+      target: guest ? 'auctions' : `auction:${upcoming.id}`,
+      title: 'Subasta futura destacada'
+    });
+  }
+
+  const lot = await first(
+    `SELECT identificador AS id, titulo AS title, estado AS status
+     FROM solicitudes_lotes
+     WHERE cliente = ?
+     ORDER BY actualizado_en DESC, identificador DESC
+     LIMIT 1`,
+    [viewer.clienteId]
+  );
+
+  if (lot) {
+    notifications.push({
+      id: `lot-${lot.id}`,
+      action: 'open_lots',
+      createdAt: new Date().toISOString(),
+      description: `${lot.title} esta en estado ${lot.status}.`,
+      priority: lot.status === 'rechazado' ? 'alta' : 'media',
+      read: lot.status !== 'rechazado',
+      target: 'purchases',
+      title: 'Seguimiento de venta'
+    });
+  }
+
+  if (notifications.length === 0) {
+    notifications.push({
+      id: 'account-ready',
+      action: 'open_auctions',
+      createdAt: new Date().toISOString(),
+      description: 'Tu cuenta no tiene acciones pendientes. Podes revisar subastas abiertas y futuras.',
+      priority: 'baja',
+      read: true,
+      target: 'auctions',
+      title: 'Cuenta al dia'
+    });
+  }
+
+  return notifications;
 }
 
 async function getUserSummary(clienteId) {

@@ -10,6 +10,7 @@ import FavoritesScreen from './src/screens/FavoritesScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LiveAuctionScreen from './src/screens/LiveAuctionScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
 import PenaltiesScreen from './src/screens/PenaltiesScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
@@ -29,6 +30,7 @@ export default function App() {
   const [authView, setAuthView] = useState('login');
   const [appView, setAppView] = useState('home');
   const [detailBackView, setDetailBackView] = useState('auctions');
+  const [notificationsBackView, setNotificationsBackView] = useState('home');
   const [paymentBackView, setPaymentBackView] = useState('home');
   const [selectedAuctionId, setSelectedAuctionId] = useState(null);
 
@@ -125,6 +127,40 @@ export default function App() {
     setAppView('liveRoom');
   }
 
+  function openNotifications(fromView = appView || 'home') {
+    setNotificationsBackView(fromView);
+    setAppView('notifications');
+  }
+
+  function handleNotificationAction(result) {
+    const target = result?.target || '';
+
+    if (target === 'verifyAccount') {
+      setAppView('verifyAccount');
+      return;
+    }
+    if (target === 'payments') {
+      openPayments('notifications');
+      return;
+    }
+    if (target === 'penalties') {
+      setNotificationsBackView('notifications');
+      setAppView('penalties');
+      return;
+    }
+    if (target === 'purchases') {
+      setAppView('purchases');
+      return;
+    }
+    if (target.startsWith('auction:')) {
+      setSelectedAuctionId(Number(target.split(':')[1]));
+      setDetailBackView('notifications');
+      setAppView('auctionDetail');
+      return;
+    }
+    setAppView('auctions');
+  }
+
   if (booting) {
     return (
       <View style={styles.loading}>
@@ -167,6 +203,7 @@ export default function App() {
             onNavigate={navigateTab}
             onOpenAuctionDetail={openAuctionDetail}
             onOpenAuctions={() => setAppView('auctions')}
+            onOpenNotifications={() => openNotifications('home')}
             onSignOut={handleSignOut}
             user={user}
           />
@@ -210,13 +247,19 @@ export default function App() {
           onGoHome={() => setAppView('home')}
           onNavigate={navigateTab}
           onOpenPayments={() => openPayments('profile')}
+          onOpenNotifications={() => openNotifications('profile')}
           onOpenPenalties={() => setAppView('penalties')}
           onSignOut={handleSignOut}
           onUserUpdated={setUser}
           user={user}
         />
       ) : user && appView === 'penalties' ? (
-        <PenaltiesScreen onBack={() => setAppView('profile')} user={user} />
+        <PenaltiesScreen onBack={() => setAppView(notificationsBackView === 'notifications' ? 'notifications' : 'profile')} user={user} />
+      ) : user && appView === 'notifications' ? (
+        <NotificationsScreen
+          onAction={handleNotificationAction}
+          onBack={() => setAppView(notificationsBackView)}
+        />
       ) : user && appView === 'auctions' ? (
         <AuctionsScreen
           onBack={() => setAppView('home')}
@@ -238,6 +281,7 @@ export default function App() {
           auctionId={selectedAuctionId}
           onBack={() => setAppView(detailBackView)}
           onEnterRoom={openLiveRoom}
+          onOpenNotifications={() => openNotifications('auctionDetail')}
           onNavigate={navigateTab}
           user={user}
         />
@@ -246,6 +290,7 @@ export default function App() {
           auctionId={selectedAuctionId}
           onBack={() => setAppView('auctionDetail')}
           onNavigate={navigateTab}
+          onOpenNotifications={() => openNotifications('liveRoom')}
           user={user}
         />
       ) : user ? (
@@ -253,6 +298,7 @@ export default function App() {
           onNavigate={navigateTab}
           onOpenAuctionDetail={openAuctionDetail}
           onOpenAuctions={() => setAppView('auctions')}
+          onOpenNotifications={() => openNotifications('home')}
           onSignOut={handleSignOut}
           user={user}
         />
