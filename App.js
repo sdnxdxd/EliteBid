@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, StatusBar, StyleSheet, View } from 'react-native';
 
 import { initDatabase } from './src/backend/database';
 import { getActiveSession, signOut } from './src/backend/authService';
@@ -19,8 +19,12 @@ import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import VerifyAccountScreen from './src/screens/VerifyAccountScreen';
 import { colors } from './src/theme';
 
+const splashImage = require('./assets/splash.png');
+const SPLASH_DURATION_MS = 3500;
+
 export default function App() {
   const [booting, setBooting] = useState(true);
+  const [splashProgress] = useState(() => new Animated.Value(0));
   const [user, setUser] = useState(null);
   const [authView, setAuthView] = useState('login');
   const [appView, setAppView] = useState('home');
@@ -30,6 +34,11 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
+    const splashTimeout = setTimeout(() => {
+      if (mounted) {
+        setBooting(false);
+      }
+    }, SPLASH_DURATION_MS);
 
     async function boot() {
       try {
@@ -44,10 +53,6 @@ export default function App() {
         }
       } catch (error) {
         console.warn('No se pudo iniciar EliteBid', error);
-      } finally {
-        if (mounted) {
-          setBooting(false);
-        }
       }
     }
 
@@ -55,8 +60,29 @@ export default function App() {
 
     return () => {
       mounted = false;
+      clearTimeout(splashTimeout);
     };
   }, []);
+
+  useEffect(() => {
+    if (!booting) {
+      return undefined;
+    }
+
+    splashProgress.setValue(0);
+    const animation = Animated.loop(
+      Animated.timing(splashProgress, {
+        duration: 1200,
+        easing: Easing.inOut(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true
+      })
+    );
+
+    animation.start();
+
+    return () => animation.stop();
+  }, [booting, splashProgress]);
 
   async function handleSignOut() {
     await signOut(user?.sessionToken);
@@ -78,7 +104,6 @@ export default function App() {
 
   function navigateTab(tab) {
     if (user?.rol === 'invitado' && ['favorites', 'purchases'].includes(tab)) {
-      setAppView('auctions');
       return;
     }
 
@@ -104,8 +129,24 @@ export default function App() {
     return (
       <View style={styles.loading}>
         <StatusBar barStyle="light-content" backgroundColor={colors.surfaceLowest} />
-        <ActivityIndicator color={colors.primary} size="large" />
-        <Text style={styles.loadingText}>Elite Bid</Text>
+        <Image resizeMode="cover" source={splashImage} style={styles.splashImage} />
+        <View style={styles.splashProgressTrack}>
+          <Animated.View
+            style={[
+              styles.splashProgressBar,
+              {
+                transform: [
+                  {
+                    translateX: splashProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-120, 260]
+                    })
+                  }
+                ]
+              }
+            ]}
+          />
+        </View>
       </View>
     );
   }
@@ -245,12 +286,28 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center'
   },
-  loadingText: {
-    color: colors.primaryContainer,
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: 0,
-    marginTop: 18,
-    textTransform: 'uppercase'
+  splashImage: {
+    height: '100%',
+    width: '100%'
+  },
+  splashProgressBar: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    height: '100%',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    width: 118
+  },
+  splashProgressTrack: {
+    backgroundColor: 'rgba(204, 193, 255, 0.18)',
+    borderRadius: 999,
+    bottom: '8.7%',
+    height: 7,
+    left: '25%',
+    overflow: 'hidden',
+    position: 'absolute',
+    right: '25%'
   }
 });

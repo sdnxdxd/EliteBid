@@ -29,6 +29,19 @@ async function migrateSecuritySchema() {
     "ALTER TABLE personas ADD COLUMN tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni' AFTER identificador"
   );
   await run("ALTER TABLE personas MODIFY tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni'");
+  await run('ALTER TABLE personas MODIFY foto_uri MEDIUMTEXT');
+  await run('ALTER TABLE documentos_identidad MODIFY frente_uri MEDIUMTEXT NOT NULL');
+  await run('ALTER TABLE documentos_identidad MODIFY dorso_uri MEDIUMTEXT NOT NULL');
+  await addColumnIfMissing(
+    'solicitudes_lotes',
+    'modo_lote',
+    "ALTER TABLE solicitudes_lotes ADD COLUMN modo_lote ENUM('unico', 'variado') DEFAULT 'unico' AFTER titulo"
+  );
+  await addColumnIfMissing(
+    'solicitudes_lotes',
+    'composicion',
+    'ALTER TABLE solicitudes_lotes ADD COLUMN composicion TEXT AFTER valor_estimado'
+  );
   await addColumnIfMissing(
     'usuarios',
     'email_verificado',

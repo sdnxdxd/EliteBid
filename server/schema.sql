@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS personas (
   nombre VARCHAR(160) NOT NULL,
   direccion VARCHAR(255),
   estado ENUM('activo', 'inactivo') DEFAULT 'activo',
-  foto_uri TEXT
+  foto_uri MEDIUMTEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS empleados (
@@ -162,8 +162,8 @@ CREATE TABLE IF NOT EXISTS medios_pago (
 CREATE TABLE IF NOT EXISTS documentos_identidad (
   identificador INT AUTO_INCREMENT PRIMARY KEY,
   persona_id INT NOT NULL,
-  frente_uri TEXT NOT NULL,
-  dorso_uri TEXT NOT NULL,
+  frente_uri MEDIUMTEXT NOT NULL,
+  dorso_uri MEDIUMTEXT NOT NULL,
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_documentos_persona FOREIGN KEY (persona_id) REFERENCES personas (identificador)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -211,4 +211,44 @@ CREATE TABLE IF NOT EXISTS penalidades (
   vencimiento DATE,
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_penalidades_cliente FOREIGN KEY (cliente) REFERENCES clientes (identificador)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS solicitudes_lotes (
+  identificador INT AUTO_INCREMENT PRIMARY KEY,
+  cliente INT NOT NULL,
+  titulo VARCHAR(180) NOT NULL,
+  modo_lote ENUM('unico', 'variado') DEFAULT 'unico',
+  tipo_bien VARCHAR(120) NOT NULL,
+  cantidad INT NOT NULL DEFAULT 1,
+  valor_estimado DECIMAL(14,2) DEFAULT 0,
+  composicion TEXT,
+  descripcion TEXT NOT NULL,
+  estado_conservacion TEXT NOT NULL,
+  historia TEXT NOT NULL,
+  origen_licito TEXT NOT NULL,
+  cuenta_cobro JSON NOT NULL,
+  declaracion_titularidad ENUM('si', 'no') DEFAULT 'no',
+  acepta_devolucion_cargo ENUM('si', 'no') DEFAULT 'no',
+  estado ENUM('pendiente', 'en_inspeccion', 'aceptado', 'rechazado', 'a_confirmar') DEFAULT 'pendiente',
+  motivo_rechazo TEXT,
+  ubicacion_deposito VARCHAR(180),
+  poliza_seguro VARCHAR(80),
+  aseguradora VARCHAR(140),
+  fecha_subasta DATE,
+  hora_subasta VARCHAR(10),
+  lugar_subasta VARCHAR(180),
+  valor_base DECIMAL(14,2),
+  comision DECIMAL(14,2),
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_solicitudes_lotes_cliente FOREIGN KEY (cliente) REFERENCES clientes (identificador)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS fotos_lote (
+  identificador INT AUTO_INCREMENT PRIMARY KEY,
+  solicitud INT NOT NULL,
+  uri MEDIUMTEXT NOT NULL,
+  orden INT NOT NULL,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_fotos_lote_solicitud FOREIGN KEY (solicitud) REFERENCES solicitudes_lotes (identificador) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

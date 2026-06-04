@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { resetPassword } from '../backend/authService';
+import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 
 export default function ResetPasswordScreen({ onBack }) {
@@ -22,7 +23,7 @@ export default function ResetPasswordScreen({ onBack }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [errorDialog, setErrorDialog] = useState('');
 
   const rules = [
     { label: 'Minimo 8 caracteres', valid: password.length >= 8 },
@@ -31,8 +32,22 @@ export default function ResetPasswordScreen({ onBack }) {
   ];
 
   async function submit() {
-    setError('');
+    setErrorDialog('');
     setMessage('');
+
+    if (!identifier.trim()) {
+      setErrorDialog('Ingresa tu correo o numero de documento para recuperar la clave.');
+      return;
+    }
+    if (!password.trim()) {
+      setErrorDialog('Ingresa una nueva contrasena.');
+      return;
+    }
+    if (!confirmPassword.trim()) {
+      setErrorDialog('Confirma tu nueva contrasena.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -41,7 +56,7 @@ export default function ResetPasswordScreen({ onBack }) {
       setPassword('');
       setConfirmPassword('');
     } catch (resetError) {
-      setError(resetError.message);
+      setErrorDialog(resetError.message);
     } finally {
       setLoading(false);
     }
@@ -55,6 +70,11 @@ export default function ResetPasswordScreen({ onBack }) {
       <LinearGradient
         colors={[colors.surfaceLowest, colors.surface, colors.surfaceContainer]}
         style={StyleSheet.absoluteFill}
+      />
+      <ErrorDialog
+        message={errorDialog}
+        onClose={() => setErrorDialog('')}
+        visible={Boolean(errorDialog)}
       />
 
       <View style={styles.topBar}>
@@ -109,7 +129,6 @@ export default function ResetPasswordScreen({ onBack }) {
           ))}
         </View>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
         {message ? <Text style={styles.message}>{message}</Text> : null}
 
         <Pressable disabled={loading} onPress={submit} style={styles.primaryButton}>
@@ -166,12 +185,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     width: 88,
     ...shadows.ambient
-  },
-  error: {
-    color: colors.error,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 14
   },
   field: {
     marginBottom: 16

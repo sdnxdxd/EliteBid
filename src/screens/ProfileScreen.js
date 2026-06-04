@@ -111,9 +111,9 @@ export default function ProfileScreen({
       const result = await ImagePicker.launchImageLibraryAsync({
         allowsEditing: true,
         aspect: [1, 1],
-        base64: Platform.OS === 'web',
+        base64: true,
         mediaTypes: ['images'],
-        quality: 0.75
+        quality: 0.45
       });
 
       if (result.canceled) {
@@ -121,10 +121,9 @@ export default function ProfileScreen({
       }
 
       const asset = result.assets[0];
-      const photoUri =
-        Platform.OS === 'web' && asset.base64
-          ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
-          : asset.uri;
+      const photoUri = asset.base64
+        ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+        : asset.uri;
 
       await updateProfilePhoto(user.clienteId, photoUri);
       const data = await getUserProfile(user.clienteId);
@@ -168,8 +167,8 @@ export default function ProfileScreen({
         <View style={styles.spotlight}>
           <Pressable onPress={changePhoto} style={styles.avatarWrap}>
             <View style={styles.avatar}>
-              {profile?.photoUri ? (
-                <Image source={{ uri: profile.photoUri }} style={styles.avatarImage} />
+              {getDisplayPhotoUri(profile?.photoUri) ? (
+                <Image source={{ uri: getDisplayPhotoUri(profile?.photoUri) }} style={styles.avatarImage} />
               ) : (
                 <Text style={styles.avatarText}>{initials(profile?.fullName)}</Text>
               )}
@@ -207,7 +206,11 @@ export default function ProfileScreen({
         </View>
 
         {guest ? (
-          <VerificationPanel compact email={form.email} onVerified={onUserUpdated} />
+          <VerificationPanel
+            compact
+            email={form.email}
+            onVerified={onUserUpdated}
+          />
         ) : null}
 
         <View style={styles.sectionHeader}>
@@ -384,6 +387,16 @@ function initials(name = '') {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join('');
+}
+
+function getDisplayPhotoUri(uri) {
+  if (!uri) {
+    return '';
+  }
+  if (Platform.OS === 'web' && /^file:\/\//i.test(uri)) {
+    return '';
+  }
+  return uri;
 }
 
 function formatCompactMoney(value) {

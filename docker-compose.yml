@@ -6,7 +6,7 @@ services:
       MYSQL_ROOT_PASSWORD: elitebid
       MYSQL_DATABASE: elitebid
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - elitebid_mysql_data:/var/lib/mysql
     healthcheck:

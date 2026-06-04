@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { registerUser } from '../backend/authService';
+import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 
 const initialForm = {
@@ -29,7 +30,7 @@ const initialForm = {
 
 export default function RegisterScreen({ onBack, onRegistered }) {
   const [form, setForm] = useState(initialForm);
-  const [error, setError] = useState('');
+  const [errorDialog, setErrorDialog] = useState('');
   const [loading, setLoading] = useState(false);
 
   function updateField(key, value) {
@@ -41,34 +42,41 @@ export default function RegisterScreen({ onBack, onRegistered }) {
   }
 
   async function pickDocument(side) {
-    setError('');
+    setErrorDialog('');
 
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      setError('Necesitamos permiso para seleccionar la foto del documento.');
+      setErrorDialog('Necesitamos permiso para seleccionar la foto del documento.');
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: true,
+      base64: Platform.OS === 'web',
       mediaTypes: ['images'],
-      quality: 0.75
+      quality: Platform.OS === 'web' ? 0.35 : 0.75
     });
 
     if (result.canceled) {
       return;
     }
 
-    updateField(side === 'frente' ? 'documentFrontUri' : 'documentBackUri', result.assets[0].uri);
+    const asset = result.assets[0];
+    const documentUri =
+      Platform.OS === 'web' && asset.base64
+        ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+        : asset.uri;
+
+    updateField(side === 'frente' ? 'documentFrontUri' : 'documentBackUri', documentUri);
   }
 
   async function submitGuest() {
-    setError('');
+    setErrorDialog('');
     const required = [
-      ['email', 'Ingresa tu correo para verificar la cuenta.'],
       ['firstName', 'Ingresa tu nombre.'],
       ['lastName', 'Ingresa tu apellido.'],
+      ['email', 'Ingresa tu correo para verificar la cuenta.'],
       ['documentNumber', 'Ingresa tu documento.'],
       ['documentFrontUri', 'Carga la foto del frente del documento.']
     ];
@@ -78,7 +86,7 @@ export default function RegisterScreen({ onBack, onRegistered }) {
 
     for (const [key, message] of required) {
       if (!String(form[key] ?? '').trim()) {
-        setError(message);
+        setErrorDialog(message);
         return;
       }
     }
@@ -89,7 +97,7 @@ export default function RegisterScreen({ onBack, onRegistered }) {
       const user = await registerUser(form);
       onRegistered(user);
     } catch (registrationError) {
-      setError(registrationError.message);
+      setErrorDialog(registrationError.message);
     } finally {
       setLoading(false);
     }
@@ -103,6 +111,11 @@ export default function RegisterScreen({ onBack, onRegistered }) {
       <LinearGradient
         colors={[colors.surfaceLowest, colors.surface, colors.surfaceLow]}
         style={StyleSheet.absoluteFill}
+      />
+      <ErrorDialog
+        message={errorDialog}
+        onClose={() => setErrorDialog('')}
+        visible={Boolean(errorDialog)}
       />
 
       <View style={styles.topBar}>
@@ -122,8 +135,6 @@ export default function RegisterScreen({ onBack, onRegistered }) {
         </View>
 
         <PersonalStep form={form} pickDocument={pickDocument} updateField={updateField} />
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable
           disabled={loading}
@@ -169,15 +180,6 @@ function PersonalStep({ form, pickDocument, updateField }) {
       </View>
 
       <Field
-        autoCapitalize="none"
-        keyboardType="email-address"
-        label="Mail"
-        onChangeText={(value) => updateField('email', value)}
-        placeholder="tu@email.com"
-        value={form.email}
-      />
-
-      <Field
         label="Nombre"
         onChangeText={(value) => updateField('firstName', value)}
         placeholder="Ej. Juan Carlos"
@@ -188,6 +190,14 @@ function PersonalStep({ form, pickDocument, updateField }) {
         onChangeText={(value) => updateField('lastName', value)}
         placeholder="Ej. Perez"
         value={form.lastName}
+      />
+      <Field
+        autoCapitalize="none"
+        keyboardType="email-address"
+        label="Mail"
+        onChangeText={(value) => updateField('email', value)}
+        placeholder="tu@email.com"
+        value={form.email}
       />
 
       <Text style={styles.label}>Tipo de documento</Text>
@@ -317,13 +327,6 @@ const styles = StyleSheet.create({
   documentSection: {
     gap: 14,
     marginBottom: 16
-  },
-  error: {
-    color: colors.error,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18,
-    marginBottom: 14
   },
   field: {
     flex: 1,

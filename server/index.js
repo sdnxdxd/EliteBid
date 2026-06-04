@@ -14,7 +14,7 @@ const SESSION_DAYS = 7;
 const categoryRank = { comun: 1, especial: 2, plata: 3, oro: 4, platino: 5 };
 
 app.use(cors());
-app.use(express.json({ limit: '4mb' }));
+app.use(express.json({ limit: '30mb' }));
 
 app.get('/api/health', async (_req, res, next) => {
   try {
@@ -34,6 +34,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   const user = await first(
     `SELECT u.id, u.email, u.password, u.nombre, u.rol, u.estado, u.cliente_id AS clienteId,
       u.verification_code_hash AS verificationCodeHash, u.verification_code_expires_at AS verificationCodeExpiresAt,
+      u.verification_code_expires_at <= UTC_TIMESTAMP() AS verificationCodeExpired,
       c.categoria, c.admitido,
       (SELECT COUNT(*) FROM medios_pago mp WHERE mp.cliente = u.cliente_id) AS paymentCount
      FROM usuarios u
@@ -75,6 +76,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
 
   const existing = await first('SELECT id FROM usuarios WHERE lower(email) = ?', [form.email]);
   if (existing) throw new Error('Ese correo ya esta registrado. Inicia sesion para continuar.');
+  await assertUniqueIdentityDocument(form.documentNumber, 'dni');
   const country = await first('SELECT numero FROM paises WHERE numero = ?', [32]);
   if (!country) throw new Error('Selecciona un pais valido.');
 
@@ -82,7 +84,7 @@ app.post('/api/auth/register', wrap(async (req, res) => {
   const personResult = await run(
     `INSERT INTO personas (documento, nombre, direccion, estado, foto_uri)
      VALUES (?, ?, ?, ?, ?)`,
-    [form.documentNumber, fullName, form.legalAddress, 'activo', form.documentFrontUri]
+    [form.documentNumber, fullName, form.legalAddress, 'activo', null]
   );
   const personId = personResult.insertId;
 
@@ -111,12 +113,13 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
 
   const existing = await first('SELECT id FROM usuarios WHERE lower(email) = ?', [form.email]);
   if (existing) throw new Error('Ese correo ya esta registrado. Inicia sesion para continuar.');
+  await assertUniqueIdentityDocument(form.documentNumber, form.documentType);
 
   const fullName = `${form.firstName} ${form.lastName}`.trim();
   const personResult = await run(
     `INSERT INTO personas (tipo_documento, documento, nombre, direccion, estado, foto_uri)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [form.documentType, form.documentNumber, fullName, form.legalAddress, 'activo', form.documentFrontUri]
+    [form.documentType, form.documentNumber, fullName, form.legalAddress, 'activo', null]
   );
   const personId = personResult.insertId;
 
@@ -176,6 +179,97 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
   });
 }));
 
+app.post('/api/auth/register/paso1', wrap(async (req, res) => {
+  const form = sanitizeGuestRegistration(fromLegacyRegistrationInput(req.body));
+
+  const existing = await first('SELECT id FROM usuarios WHERE lower(email) = ?', [form.email]);
+  if (existing) throw new Error('Ese correo ya esta registrado. Inicia sesion para continuar.');
+  await assertUniqueIdentityDocument(form.documentNumber, form.documentType);
+
+  const fullName = `${form.firstName} ${form.lastName}`.trim();
+  const personResult = await run(
+    `INSERT INTO personas (tipo_documento, documento, nombre, direccion, estado, foto_uri)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [form.documentType, form.documentNumber, fullName, form.legalAddress, 'activo', null]
+  );
+  const personId = personResult.insertId;
+
+  await run('INSERT INTO documentos_identidad (persona_id, frente_uri, dorso_uri) VALUES (?, ?, ?)', [
+    personId,
+    form.documentFrontUri,
+    form.documentBackUri
+  ]);
+  await run(
+    `INSERT INTO clientes (identificador, numero_pais, admitido, categoria, verificador)
+     VALUES (?, ?, ?, ?, ?)`,
+    [personId, 32, 'si', 'comun', 2]
+  );
+
+  const verificationCode = createOneTimeCode();
+  await run(
+    `INSERT INTO usuarios (cliente_id, email, password, nombre, rol, estado, email_verificado, verification_code_hash, verification_code_expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      personId,
+      form.email,
+      await hashPassword(createToken()),
+      form.firstName,
+      'invitado',
+      'pendiente',
+      'no',
+      await hashPassword(verificationCode),
+      toMysqlDateTime(new Date(Date.now() + 15 * 60 * 1000))
+    ]
+  );
+
+  const user = await first('SELECT id FROM usuarios WHERE lower(email) = ? LIMIT 1', [form.email]);
+  const emailResult = await sendVerificationForUser({
+    email: form.email,
+    name: form.firstName,
+    token: verificationCode
+  });
+
+  res.status(201).json({
+    email: form.email,
+    estado: 'pendiente',
+    registrationId: String(user.id),
+    verificationEmailSent: emailResult.sent
+  });
+}));
+
+app.post('/api/auth/register/paso2', wrap(async (req, res) => {
+  const registrationId = parsePositiveInt(req.body.registrationId, 'Registro previo inexistente.');
+  validatePassword(req.body.password, req.body.confirmPassword);
+  const user = await first(
+    `SELECT u.id, u.email, u.nombre, u.rol, u.estado, u.cliente_id AS clienteId,
+      c.categoria, c.admitido,
+      (SELECT COUNT(*) FROM medios_pago mp WHERE mp.cliente = u.cliente_id) AS paymentCount
+     FROM usuarios u
+     JOIN clientes c ON c.identificador = u.cliente_id
+     WHERE u.id = ? AND u.estado = 'pendiente'
+     LIMIT 1`,
+    [registrationId]
+  );
+
+  if (!user) throw new Error('Registro previo inexistente.');
+  await run(
+    `UPDATE usuarios
+     SET password = ?, rol = 'cliente', estado = 'activo', email_verificado = 'si',
+       verification_code_hash = NULL, verification_code_expires_at = NULL
+     WHERE id = ?`,
+    [await hashPassword(req.body.password), user.id]
+  );
+  const token = createToken();
+  await run('DELETE FROM sesiones WHERE usuario_id = ?', [user.id]);
+  await run('INSERT INTO sesiones (token, usuario_id, expira_en) VALUES (?, ?, ?)', [
+    token,
+    user.id,
+    toMysqlDateTime(new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000))
+  ]);
+
+  res.json(toSessionUser({ ...user, rol: 'cliente', estado: 'activo' }, token));
+}));
+
 app.post('/api/auth/resend-verification', wrap(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   if (!email) throw new Error('Ingresa un correo valido.');
@@ -204,7 +298,10 @@ app.post('/api/auth/resend-verification', wrap(async (req, res) => {
     token: verificationCode
   });
 
-  res.json({ ok: true, verificationEmailSent: emailResult.sent });
+  res.json({
+    ok: true,
+    verificationEmailSent: emailResult.sent
+  });
 }));
 
 app.post('/api/auth/complete-verification', wrap(async (req, res) => {
@@ -217,7 +314,9 @@ app.post('/api/auth/complete-verification', wrap(async (req, res) => {
 
   const user = await first(
     `SELECT u.id, u.email, u.nombre, u.rol, u.estado, u.password, u.verification_code_hash AS verificationCodeHash,
-      u.verification_code_expires_at AS verificationCodeExpiresAt, u.cliente_id AS clienteId, c.categoria, c.admitido,
+      u.verification_code_expires_at AS verificationCodeExpiresAt,
+      u.verification_code_expires_at <= UTC_TIMESTAMP() AS verificationCodeExpired,
+      u.cliente_id AS clienteId, c.categoria, c.admitido,
       (SELECT COUNT(*) FROM medios_pago mp WHERE mp.cliente = u.cliente_id) AS paymentCount
      FROM usuarios u
      JOIN clientes c ON c.identificador = u.cliente_id
@@ -229,7 +328,7 @@ app.post('/api/auth/complete-verification', wrap(async (req, res) => {
   if (!user) throw new Error('No encontramos una cuenta pendiente con ese correo.');
   if (user.estado !== 'pendiente') throw new Error('La cuenta ya no esta pendiente.');
   if (!user.verificationCodeHash) throw new Error('Solicita un nuevo codigo de verificacion.');
-  if (new Date(user.verificationCodeExpiresAt).getTime() < Date.now()) {
+  if (Number(user.verificationCodeExpired)) {
     throw new Error('El codigo vencio. Solicita uno nuevo.');
   }
 
@@ -244,14 +343,22 @@ app.post('/api/auth/complete-verification', wrap(async (req, res) => {
     [await hashPassword(req.body.password), user.id]
   );
 
-  const sessionToken = token || createToken();
+  let sessionToken = token || '';
   if (token) {
-    await run('UPDATE sesiones SET expira_en = ? WHERE token = ? AND usuario_id = ?', [
+    const sessionUpdate = await run('UPDATE sesiones SET expira_en = ? WHERE token = ? AND usuario_id = ?', [
       toMysqlDateTime(new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000)),
       token,
       user.id
     ]);
-  } else {
+
+    if (!sessionUpdate.affectedRows) {
+      sessionToken = '';
+    }
+  }
+
+  if (!sessionToken) {
+    sessionToken = createToken();
+    await run('DELETE FROM sesiones WHERE usuario_id = ?', [user.id]);
     await run('INSERT INTO sesiones (token, usuario_id, expira_en) VALUES (?, ?, ?)', [
       sessionToken,
       user.id,
@@ -316,6 +423,12 @@ app.delete('/api/auth/session', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+app.post('/api/auth/logout', wrap(async (req, res) => {
+  const token = bearerToken(req);
+  if (token) await run('DELETE FROM sesiones WHERE token = ?', [token]);
+  res.json({ ok: true });
+}));
+
 app.post('/api/auth/reset-password', wrap(async (req, res) => {
   const { identifier = '', password, confirmPassword } = req.body;
   const cleanIdentifier = normalizeWhitespace(identifier);
@@ -329,7 +442,10 @@ app.post('/api/auth/reset-password', wrap(async (req, res) => {
     `SELECT u.id
      FROM usuarios u
      JOIN personas p ON p.identificador = u.cliente_id
-     WHERE lower(u.email) = ? OR p.documento = ?
+     WHERE (lower(u.email) = ? OR p.documento = ?)
+       AND u.rol = 'cliente'
+       AND u.estado = 'activo'
+       AND u.email_verificado = 'si'
      LIMIT 1`,
     [emailIdentifier, documentIdentifier]
   );
@@ -337,6 +453,131 @@ app.post('/api/auth/reset-password', wrap(async (req, res) => {
   await run('UPDATE usuarios SET password = ? WHERE id = ?', [await hashPassword(password), user.id]);
   await run('DELETE FROM sesiones WHERE usuario_id = ?', [user.id]);
   res.json({ ok: true });
+}));
+
+app.get('/api/usuarios/me', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const profile = await getUserProfile(viewer.clienteId);
+  res.json(toLegacyUser(profile, viewer));
+}));
+
+app.get('/api/usuarios/me/medios-de-pago', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  res.json(await getUserPayments(viewer.clienteId));
+}));
+
+app.post('/api/usuarios/me/medios-de-pago', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para agregar medios de pago.');
+  const payment = sanitizePayment(fromLegacyPaymentInput(req.body));
+  const verified = payment.type === 'cheque' ? 'no' : 'si';
+  await run(
+    `INSERT INTO medios_pago (cliente, tipo, detalle, moneda, monto_garantia, verificado)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [viewer.clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), 'ARS', payment.amount, verified]
+  );
+  res.status(201).json(await getUserPayments(viewer.clienteId));
+}));
+
+app.get('/api/usuarios/me/compras', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  res.json(await getUserPurchases(viewer.clienteId));
+}));
+
+app.get('/api/usuarios/me/penalidades', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  res.json(await getUserPenalties(viewer.clienteId));
+}));
+
+app.get('/api/usuarios/me/metricas', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  res.json(await getUserSummary(viewer.clienteId));
+}));
+
+app.get('/api/notificaciones', wrap(async (req, res) => {
+  await requireAuthenticatedClient(req);
+  res.json([]);
+}));
+
+app.post('/api/uploads', wrap(async (req, res) => {
+  await requireAuthenticatedClient(req);
+  const files = Array.isArray(req.body.files) ? req.body.files : [];
+  const uploadIds = files.map((_, index) => `upload-${Date.now()}-${index + 1}`);
+  res.status(201).json({ files: uploadIds.map((id) => ({ id })), uploadIds });
+}));
+
+app.get('/api/solicitudes-venta', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const lots = await getUserLots(viewer.clienteId);
+  res.json({ solicitudes: lots.map(toSaleRequestContract) });
+}));
+
+app.post('/api/solicitudes-venta', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para cargar lotes a subasta.');
+  const lot = sanitizeLotSubmission(fromSaleRequestInput(req.body));
+  const result = await createLotSubmission(viewer.clienteId, lot);
+  const rows = await getUserLots(viewer.clienteId);
+  const created = rows.find((row) => row.id === result.insertId);
+  res.status(201).json(toSaleRequestContract(created));
+}));
+
+app.get('/api/subastas', wrap(async (req, res) => {
+  const viewer = await getOptionalAuthenticatedClient(req);
+  res.json(await getAuctionRows(viewer));
+}));
+
+app.get('/api/subastas/:auctionId/catalogo', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const detail = await getAuctionDetail(parsePositiveInt(req.params.auctionId, 'Subasta invalida.'), viewer.clienteId);
+  res.json({ catalogo: [toCatalogLot(detail)] });
+}));
+
+app.get('/api/subastas/:auctionId/stream', wrap(async (req, res) => {
+  await requireAuthenticatedClient(req);
+  res.json({ status: 'disponible', message: 'El streaming se consulta desde el servicio de la empresa.' });
+}));
+
+app.get('/api/subastas/:auctionId', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  res.json(await getAuctionDetail(parsePositiveInt(req.params.auctionId, 'Subasta invalida.'), viewer.clienteId));
+}));
+
+app.post('/api/subastas/:auctionId/favoritos', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para guardar favoritos.');
+  const existing = await first('SELECT 1 AS found FROM favoritos WHERE cliente = ? AND subasta = ?', [
+    viewer.clienteId,
+    auctionId
+  ]);
+
+  if (existing) {
+    await run('DELETE FROM favoritos WHERE cliente = ? AND subasta = ?', [viewer.clienteId, auctionId]);
+  } else {
+    await run('INSERT INTO favoritos (cliente, subasta) VALUES (?, ?)', [viewer.clienteId, auctionId]);
+  }
+
+  res.json({ favorito: !existing });
+}));
+
+app.post('/api/subastas/:auctionId/registrar', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para ingresar a una sala.');
+  res.json(await enterAuctionRoom(viewer.clienteId, parsePositiveInt(req.params.auctionId, 'Subasta invalida.')));
+}));
+
+app.post('/api/subastas/:auctionId/pujas', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const amount = parseMoney(req.body.monto ?? req.body.amount, 'Ingresa un monto valido para pujar.');
+  const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
+
+  const bidResult = await placeAuctionBid(viewer.clienteId, auctionId, amount);
+  res.status(201).json({
+    bid: { id: bidResult.bid.id, amount: bidResult.bid.amount, monto: bidResult.bid.amount },
+    bounds: bidResult.bounds,
+    lote: toCatalogLot(bidResult.auction)
+  });
 }));
 
 app.get('/api/auctions/home', wrap(async (_req, res) => {
@@ -367,32 +608,8 @@ app.post('/api/auctions/:auctionId/bids', wrap(async (req, res) => {
   const clienteId = parsePositiveInt(req.body.clienteId, 'Cliente invalido.');
   const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
 
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para pujar.');
-  if (amount <= 0) throw new Error('Ingresa un monto valido para pujar.');
-
-  const detail = await enterAuctionRoom(clienteId, auctionId);
-  const userCategory = await getClientCategory(clienteId);
-  const currentBid = Number(detail.currentBid || detail.basePrice || 0);
-  const basePrice = Number(detail.basePrice || 0);
-  const minBid = currentBid + basePrice * 0.01;
-  const maxBid = currentBid + basePrice * 0.2;
-  const bypassRange = ['oro', 'platino'].includes(userCategory);
-
-  if (amount <= currentBid) throw new Error(`El monto debe superar la puja actual de ${formatMoney(currentBid)}.`);
-  if (!bypassRange && amount < minBid) throw new Error(`El monto debe ser al menos ${formatMoney(minBid)}.`);
-  if (!bypassRange && amount > maxBid) throw new Error(`El monto no puede superar ${formatMoney(maxBid)}.`);
-
-  const assistantId = await ensureAssistant(clienteId, auctionId);
-  await run('UPDATE pujos SET ganador = ? WHERE item = ?', ['no', detail.itemId]);
-  const result = await run('INSERT INTO pujos (asistente, item, importe, ganador) VALUES (?, ?, ?, ?)', [
-    assistantId,
-    detail.itemId,
-    amount,
-    'si'
-  ]);
-  await run('UPDATE items_catalogo SET puja_actual = ? WHERE identificador = ?', [amount, detail.itemId]);
-
-  res.json({ auction: await getAuctionDetail(auctionId, clienteId), bid: { id: result.insertId, amount } });
+  const bidResult = await placeAuctionBid(clienteId, auctionId, amount);
+  res.json({ auction: bidResult.auction, bid: bidResult.bid });
 }));
 
 app.get('/api/users/:clienteId/summary', wrap(async (req, res) => {
@@ -451,6 +668,20 @@ app.get('/api/users/:clienteId/purchases', wrap(async (req, res) => {
   const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
   if (await isGuest(clienteId)) return res.json([]);
   res.json(await getUserPurchases(clienteId));
+}));
+
+app.get('/api/users/:clienteId/lots', wrap(async (req, res) => {
+  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
+  if (await isGuest(clienteId)) return res.json([]);
+  res.json(await getUserLots(clienteId));
+}));
+
+app.post('/api/users/:clienteId/lots', wrap(async (req, res) => {
+  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
+  await assertNotGuest(clienteId, 'Verifica tu cuenta para cargar lotes a subasta.');
+  const lot = sanitizeLotSubmission(req.body);
+  await createLotSubmission(clienteId, lot);
+  res.status(201).json(await getUserLots(clienteId));
 }));
 
 app.post('/api/users/:clienteId/purchases/:bidId/settle', wrap(async (req, res) => {
@@ -687,6 +918,39 @@ async function ensureAssistant(clienteId, auctionId) {
   return result.insertId;
 }
 
+async function placeAuctionBid(clienteId, auctionId, amount) {
+  await assertNotGuest(clienteId, 'Verifica tu cuenta para pujar.');
+  if (amount <= 0) throw new Error('Ingresa un monto valido para pujar.');
+
+  const detail = await enterAuctionRoom(clienteId, auctionId);
+  const userCategory = await getClientCategory(clienteId);
+  const currentBid = Number(detail.currentBid || detail.basePrice || 0);
+  const basePrice = Number(detail.basePrice || 0);
+  const minBid = currentBid + basePrice * 0.01;
+  const maxBid = currentBid + basePrice * 0.2;
+  const bypassRange = ['oro', 'platino'].includes(userCategory);
+
+  if (amount <= currentBid) throw new Error(`El monto debe superar la puja actual de ${formatMoney(currentBid)}.`);
+  if (!bypassRange && amount < minBid) throw new Error(`El monto debe ser al menos ${formatMoney(minBid)}.`);
+  if (!bypassRange && amount > maxBid) throw new Error(`El monto no puede superar ${formatMoney(maxBid)}.`);
+
+  const assistantId = await ensureAssistant(clienteId, auctionId);
+  await run('UPDATE pujos SET ganador = ? WHERE item = ?', ['no', detail.itemId]);
+  const result = await run('INSERT INTO pujos (asistente, item, importe, ganador) VALUES (?, ?, ?, ?)', [
+    assistantId,
+    detail.itemId,
+    amount,
+    'si'
+  ]);
+  await run('UPDATE items_catalogo SET puja_actual = ? WHERE identificador = ?', [amount, detail.itemId]);
+
+  return {
+    auction: await getAuctionDetail(auctionId, clienteId),
+    bid: { id: result.insertId, amount },
+    bounds: { min: minBid, max: bypassRange ? null : maxBid }
+  };
+}
+
 async function getClientCategory(clienteId) {
   const row = await first('SELECT categoria AS category FROM clientes WHERE identificador = ?', [clienteId]);
   return row?.category ?? 'comun';
@@ -708,6 +972,36 @@ async function getViewer(clienteId) {
      LIMIT 1`,
     [Number(clienteId)]
   );
+}
+
+async function getOptionalAuthenticatedClient(req) {
+  const token = bearerToken(req) || req.query.access_token;
+  if (!token) return null;
+
+  const session = await first(
+    `SELECT s.token AS sessionToken, u.id, u.email, u.nombre, u.rol, u.estado,
+      u.cliente_id AS clienteId, c.categoria, c.admitido,
+      (SELECT COUNT(*) FROM medios_pago mp WHERE mp.cliente = u.cliente_id) AS paymentCount
+     FROM sesiones s
+     JOIN usuarios u ON u.id = s.usuario_id
+     JOIN clientes c ON c.identificador = u.cliente_id
+     WHERE s.token = ? AND s.expira_en > NOW()
+     LIMIT 1`,
+    [token]
+  );
+
+  if (!session) return null;
+  const pendingGuest = session.rol === 'invitado' && session.estado === 'pendiente';
+  if ((session.estado !== 'activo' && !pendingGuest) || session.admitido !== 'si') return null;
+  return session;
+}
+
+async function requireAuthenticatedClient(req) {
+  const viewer = await getOptionalAuthenticatedClient(req);
+  if (!viewer) {
+    throw new Error('Inicia sesion para continuar.');
+  }
+  return viewer;
 }
 
 async function isGuest(clienteId) {
@@ -756,6 +1050,42 @@ async function getFavoriteAuctions(clienteId) {
   );
 }
 
+async function getUserPayments(clienteId) {
+  const rows = await query(
+    `SELECT identificador AS id, tipo AS type, detalle AS detail, moneda AS currency,
+      monto_garantia AS amount, verificado AS verified
+     FROM medios_pago
+     WHERE cliente = ?
+     ORDER BY identificador DESC`,
+    [clienteId]
+  );
+  return rows.map((row) => ({ ...row, parsedDetail: parseDetail(row.detail) }));
+}
+
+async function getUserSummary(clienteId) {
+  const payments = await first(
+    `SELECT COUNT(*) AS verifiedPayments FROM medios_pago WHERE cliente = ? AND verificado = 'si'`,
+    [clienteId]
+  );
+  const bids = await first(
+    `SELECT COUNT(*) AS totalBids
+     FROM pujos p JOIN asistentes a ON a.identificador = p.asistente
+     WHERE a.cliente = ?`,
+    [clienteId]
+  );
+  const wins = await first(
+    `SELECT COUNT(*) AS totalWins
+     FROM pujos p JOIN asistentes a ON a.identificador = p.asistente
+     WHERE a.cliente = ? AND p.ganador = 'si'`,
+    [clienteId]
+  );
+  return {
+    totalBids: bids?.totalBids ?? 0,
+    totalWins: wins?.totalWins ?? 0,
+    verifiedPayments: payments?.verifiedPayments ?? 0
+  };
+}
+
 async function getUserPurchases(clienteId) {
   return query(
     `SELECT p.identificador AS id, p.importe AS amount, p.creado_en AS createdAt,
@@ -775,6 +1105,124 @@ async function getUserPurchases(clienteId) {
      ORDER BY CASE WHEN r.identificador IS NULL THEN 0 ELSE 1 END, p.identificador DESC`,
     [clienteId]
   );
+}
+
+async function getUserLots(clienteId) {
+  const rows = await query(
+    `SELECT identificador AS id, cliente AS clienteId, titulo AS title, modo_lote AS lotKind,
+      tipo_bien AS itemType, cantidad AS quantity, valor_estimado AS estimatedValue,
+      composicion AS composition, descripcion AS description, estado_conservacion AS conditionText,
+      historia AS history, origen_licito AS legalOrigin, cuenta_cobro AS payoutAccount,
+      declaracion_titularidad AS ownershipDeclaration, acepta_devolucion_cargo AS returnChargeAccepted,
+      estado AS status, motivo_rechazo AS rejectionReason, ubicacion_deposito AS storageLocation,
+      poliza_seguro AS insurancePolicy, aseguradora AS insuranceCompany,
+      DATE_FORMAT(fecha_subasta, '%Y-%m-%d') AS auctionDate, hora_subasta AS auctionTime,
+      lugar_subasta AS auctionLocation, valor_base AS basePrice, comision AS commission,
+      creado_en AS createdAt, actualizado_en AS updatedAt
+     FROM solicitudes_lotes
+     WHERE cliente = ?
+     ORDER BY identificador DESC`,
+    [clienteId]
+  );
+
+  const lots = [];
+  for (const row of rows) {
+    const photos = await query(
+      `SELECT identificador AS id, uri, orden AS position
+       FROM fotos_lote
+       WHERE solicitud = ?
+       ORDER BY orden ASC, identificador ASC`,
+      [row.id]
+    );
+    lots.push({
+      ...row,
+      photoUris: photos.map((photo) => photo.uri),
+      photos,
+      payoutAccount: parseDetail(row.payoutAccount)
+    });
+  }
+
+  return lots;
+}
+
+async function createLotSubmission(clienteId, lot) {
+  const result = await run(
+    `INSERT INTO solicitudes_lotes (
+      cliente, titulo, modo_lote, tipo_bien, cantidad, valor_estimado, composicion, descripcion, estado_conservacion,
+      historia, origen_licito, cuenta_cobro, declaracion_titularidad, acepta_devolucion_cargo, estado
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      clienteId,
+      lot.title,
+      lot.lotKind,
+      lot.itemType,
+      lot.quantity,
+      lot.estimatedValue,
+      lot.composition,
+      lot.description,
+      lot.condition,
+      lot.history,
+      lot.legalOrigin,
+      JSON.stringify(lot.payoutAccount),
+      'si',
+      'si',
+      'pendiente'
+    ]
+  );
+
+  for (const [index, uri] of lot.photoUris.entries()) {
+    await run('INSERT INTO fotos_lote (solicitud, uri, orden) VALUES (?, ?, ?)', [
+      result.insertId,
+      uri,
+      index + 1
+    ]);
+  }
+
+  return result;
+}
+
+function toSaleRequestContract(lot) {
+  return {
+    ...lot,
+    composicion: lot.composition,
+    declaracionPropiedad: lot.ownershipDeclaration === 'si' || lot.ownershipDeclaration === true,
+    descripcion: lot.description,
+    estado: lot.status,
+    fecha: lot.createdAt,
+    fotos: lot.photoUris?.length || 0,
+    nombreBien: lot.title,
+    precioEstimado: Number(lot.estimatedValue || 0),
+    tipoLote: lot.lotKind,
+    uploadIds: lot.photoUris || [],
+    userId: String(lot.clienteId || '')
+  };
+}
+
+function toCatalogLot(detail) {
+  return {
+    id: String(detail.itemId || detail.productId || detail.id),
+    descripcion: detail.description,
+    estado: detail.status,
+    fotos: detail.imageUrl ? [detail.imageUrl] : [],
+    loteId: String(detail.itemId || detail.productId || detail.id),
+    nombre: detail.title,
+    precioBase: detail.basePrice,
+    pujaActual: detail.currentBid
+  };
+}
+
+function toLegacyUser(profile, viewer) {
+  return {
+    id: String(profile?.clienteId ?? viewer.clienteId),
+    apellido: profile?.identityLastName ?? '',
+    categoria: profile?.categoria ?? viewer.categoria,
+    email: profile?.email ?? viewer.email,
+    estado: viewer.estado,
+    ganadas: Number(profile?.auctionsWon || 0),
+    mediosPagoVerificados: Number(viewer.paymentCount || 0),
+    nombre: profile?.identityFirstName ?? viewer.nombre,
+    participaciones: Number(profile?.auctionsAttended || 0)
+  };
 }
 
 async function getUserProfile(clienteId) {
@@ -825,6 +1273,20 @@ async function assertImmutableIdentity(clienteId, payload) {
   }
 }
 
+async function assertUniqueIdentityDocument(documentNumber, documentType = 'dni') {
+  const existing = await first(
+    `SELECT identificador
+     FROM personas
+     WHERE documento = ? AND tipo_documento = ?
+     LIMIT 1`,
+    [documentNumber, documentType]
+  );
+
+  if (existing) {
+    throw new Error('Ese documento ya esta registrado. Inicia sesion para continuar.');
+  }
+}
+
 function wrap(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
@@ -851,7 +1313,7 @@ async function assertPendingGuestCode(user, codeValue) {
   const code = normalizeOneTimeCode(codeValue);
   if (!code) throw new Error('Ingresa el codigo de un solo uso para volver a entrar.');
   if (!user.verificationCodeHash) throw new Error('Solicita un nuevo codigo de verificacion.');
-  if (new Date(user.verificationCodeExpiresAt).getTime() < Date.now()) {
+  if (Number(user.verificationCodeExpired)) {
     throw new Error('El codigo vencio. Solicita uno nuevo.');
   }
 
@@ -936,6 +1398,35 @@ function createOneTimeCode() {
 
 function toMysqlDateTime(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function fromLegacyRegistrationInput(payload) {
+  const documentFrontUri =
+    payload.documentFrontUri ||
+    payload.documentoFrente ||
+    payload.documentos?.frente ||
+    payload.documentos?.front ||
+    payload.documentos?.[0] ||
+    'https://elitebid.local/uploads/documento-frente.jpg';
+  const documentBackUri =
+    payload.documentBackUri ||
+    payload.documentoDorso ||
+    payload.documentos?.dorso ||
+    payload.documentos?.back ||
+    payload.documentos?.[1] ||
+    documentFrontUri;
+
+  return {
+    ...payload,
+    documentBackUri,
+    documentFrontUri,
+    documentNumber: payload.documentNumber ?? payload.documento ?? payload.dni ?? payload.numeroDocumento,
+    documentType: payload.documentType ?? payload.tipoDocumento ?? 'dni',
+    email: payload.email,
+    firstName: payload.firstName ?? payload.nombre,
+    lastName: payload.lastName ?? payload.apellido,
+    legalAddress: payload.legalAddress ?? payload.domicilioLegal ?? payload.direccion
+  };
 }
 
 function sanitizeRegistration(form) {
@@ -1119,6 +1610,159 @@ function buildPaymentDetail(payload) {
     issueDate: payload.issueDate.trim(),
     checkImageUri: payload.checkImageUri.trim()
   };
+}
+
+function fromLegacyPaymentInput(payload) {
+  const type = normalizeWhitespace(payload.tipo ?? payload.type).toLowerCase();
+  if (type === 'tarjeta') {
+    const lastDigits = onlyDigits(payload.ultimosDigitos || '').slice(-4) || '1111';
+    return {
+      type,
+      amount: payload.montoGarantia ?? payload.amount ?? 1,
+      cardHolder: payload.titular ?? payload.cardHolder,
+      cardNumber: payload.cardNumber ?? payload.numero ?? `411111111111${lastDigits}`,
+      cvv: payload.cvv ?? '123',
+      expiry: payload.expiry ?? '12/29'
+    };
+  }
+  if (type === 'cuenta') {
+    return {
+      type,
+      amount: payload.montoGarantia ?? payload.amount ?? 1,
+      accountType: payload.accountType ?? 'Cuenta bancaria',
+      alias: payload.alias,
+      bank: payload.banco ?? payload.bank,
+      cbu: payload.cbu
+    };
+  }
+  return {
+    type,
+    amount: payload.montoGarantia ?? payload.amount ?? 1,
+    bank: payload.banco ?? payload.bank,
+    checkImageUri: payload.checkImageUri ?? payload.uploadIds?.[0] ?? 'https://elitebid.local/uploads/cheque.jpg',
+    checkNumber: payload.numero ?? payload.checkNumber,
+    issueDate: payload.issueDate ?? new Date().toISOString().slice(0, 10)
+  };
+}
+
+function fromSaleRequestInput(payload) {
+  const uploadIds = Array.isArray(payload.uploadIds) ? payload.uploadIds : [];
+  const photoUris = Array.isArray(payload.photoUris) ? payload.photoUris : uploadIds;
+  const expectedPhotos = Number(payload.fotos || photoUris.length || 0);
+  const fallbackPhotos = Array.from({ length: Math.max(0, expectedPhotos) }).map(
+    (_, index) => `https://elitebid.local/uploads/solicitud-${Date.now()}-${index + 1}.jpg`
+  );
+
+  return {
+    ...payload,
+    condition: payload.condition ?? payload.estadoConservacion ?? 'Pendiente de inspeccion por la empresa.',
+    composition: payload.composition ?? payload.composicion ?? '',
+    description: payload.description ?? payload.descripcion,
+    estimatedValue: payload.estimatedValue ?? payload.precioEstimado,
+    history: payload.history ?? payload.historia ?? 'Sin historia adicional declarada.',
+    itemType: payload.itemType ?? payload.tipoBien ?? 'Bien a subastar',
+    legalOrigin: payload.legalOrigin ?? payload.origenLicito ?? 'Acreditacion pendiente de presentar ante la empresa.',
+    lotKind: payload.lotKind ?? payload.tipoLote ?? 'unico',
+    ownershipDeclaration: payload.ownershipDeclaration ?? payload.declaracionPropiedad,
+    payoutAccountHolder: payload.payoutAccountHolder ?? payload.titularCobro ?? 'Titular a confirmar',
+    payoutBank: payload.payoutBank ?? payload.bancoCobro ?? 'Banco a confirmar',
+    payoutReference: payload.payoutReference ?? payload.referenciaCobro ?? 'Cuenta a confirmar',
+    photoUris: photoUris.length ? photoUris : fallbackPhotos,
+    quantity: payload.quantity ?? payload.cantidad ?? 1,
+    returnChargeAccepted: payload.returnChargeAccepted ?? payload.aceptaDevolucionCargo ?? true,
+    title: payload.title ?? payload.nombreBien
+  };
+}
+
+function sanitizeLotSubmission(payload) {
+  requireFields(payload, [
+    ['title', 'Ingresa el nombre del lote o producto.'],
+    ['itemType', 'Ingresa el tipo de lote o categoria principal.'],
+    ['quantity', 'Ingresa la cantidad de productos o piezas.'],
+    ['description', 'Describe la venta que queres subastar.'],
+    ['condition', 'Indica el estado de conservacion.'],
+    ['history', 'Agrega la historia o datos relevantes del bien.'],
+    ['legalOrigin', 'Indica como podes acreditar el origen licito.'],
+    ['payoutBank', 'Ingresa el banco de la cuenta de cobro.'],
+    ['payoutAccountHolder', 'Ingresa el titular de la cuenta de cobro.'],
+    ['payoutReference', 'Ingresa CBU, CVU, IBAN o alias de cobro.']
+  ]);
+
+  const photoUris = Array.isArray(payload.photoUris)
+    ? payload.photoUris.map((uri) => sanitizeUri(uri, 'Revisa las fotos del lote.'))
+    : [];
+  if (photoUris.length < 6) {
+    throw new Error('Carga al menos 6 fotos del bien o lote.');
+  }
+  if (photoUris.length > 10) {
+    throw new Error('Carga hasta 10 fotos por solicitud.');
+  }
+
+  if (!toBoolean(payload.ownershipDeclaration)) {
+    throw new Error('Debes declarar que el bien te pertenece y no tiene impedimentos.');
+  }
+  if (!toBoolean(payload.returnChargeAccepted)) {
+    throw new Error('Debes aceptar la devolucion con cargo si la empresa no acepta el bien.');
+  }
+
+  const quantity = parseQuantity(payload.quantity);
+  const lotKind = normalizeLotKind(payload.lotKind);
+  const composition = normalizeWhitespace(payload.composition);
+  if (lotKind === 'variado' && composition.length < 10) {
+    throw new Error('Detalla que productos distintos componen el lote variado.');
+  }
+  if (composition.length > 1600) {
+    throw new Error('Resume la composicion del lote.');
+  }
+  const estimatedValue = payload.estimatedValue
+    ? parseMoney(payload.estimatedValue, 'Ingresa un valor estimado valido.')
+    : 0;
+  if (estimatedValue > 999999999.99) {
+    throw new Error('Ingresa un valor estimado menor.');
+  }
+
+  return {
+    title: normalizeLotText(payload.title, 'Ingresa un nombre de lote valido.', 180),
+    lotKind,
+    itemType: normalizeLotText(payload.itemType, 'Ingresa un tipo de bien valido.', 120),
+    quantity,
+    estimatedValue,
+    composition,
+    description: normalizeLotText(payload.description, 'Describe el bien con mas detalle.', 1200, 20),
+    condition: normalizeLotText(payload.condition, 'Indica el estado de conservacion con mas detalle.', 800, 10),
+    history: normalizeLotText(payload.history, 'Agrega historia, procedencia o datos relevantes.', 1600, 10),
+    legalOrigin: normalizeLotText(payload.legalOrigin, 'Indica como podes acreditar el origen licito.', 1200, 10),
+    payoutAccount: {
+      accountHolder: normalizePersonName(payload.payoutAccountHolder, 'Ingresa un titular de cuenta valido.'),
+      bank: normalizeLotText(payload.payoutBank, 'Ingresa un banco valido.', 120),
+      reference: normalizeLotText(payload.payoutReference, 'Ingresa CBU, CVU, IBAN o alias valido.', 80)
+    },
+    photoUris
+  };
+}
+
+function normalizeLotKind(value = '') {
+  return normalizeWhitespace(value).toLowerCase() === 'variado' ? 'variado' : 'unico';
+}
+
+function normalizeLotText(value, message, maxLength, minLength = 2) {
+  const text = normalizeWhitespace(value);
+  if (text.length < minLength || text.length > maxLength) {
+    throw new Error(message);
+  }
+  return text;
+}
+
+function parseQuantity(value) {
+  const quantity = Number(onlyDigits(value));
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
+    throw new Error('Ingresa una cantidad de piezas valida.');
+  }
+  return quantity;
+}
+
+function toBoolean(value) {
+  return value === true || value === 'true' || value === 'si' || value === 1 || value === '1';
 }
 
 function parseDetail(detail) {
@@ -1307,10 +1951,11 @@ function normalizeDate(value = '', message = 'Ingresa una fecha valida.') {
 
 function sanitizeUri(value = '', message = 'Ingresa una ruta valida.') {
   const uri = normalizeWhitespace(value);
+  const maxLength = uri.startsWith('data:image/') ? 12_000_000 : 2000;
 
   if (
     !uri ||
-    uri.length > 2000 ||
+    uri.length > maxLength ||
     /^javascript:/i.test(uri) ||
     !/^(https?:\/\/|file:\/\/|data:image\/|blob:|content:\/\/)/i.test(uri)
   ) {

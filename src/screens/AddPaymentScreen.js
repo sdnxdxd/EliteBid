@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { addPaymentMethod } from '../backend/paymentService';
+import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 
 const initialForm = {
@@ -41,7 +42,7 @@ const tabs = [
 
 export default function AddPaymentScreen({ onBack, onSaved, user }) {
   const [form, setForm] = useState(initialForm);
-  const [error, setError] = useState('');
+  const [errorDialog, setErrorDialog] = useState('');
   const [loading, setLoading] = useState(false);
 
   function updateField(key, value) {
@@ -49,39 +50,46 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
   }
 
   function changeTab(type) {
-    setError('');
+    setErrorDialog('');
     setForm((current) => ({ ...current, type }));
   }
 
   async function pickCheckImage() {
-    setError('');
+    setErrorDialog('');
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      setError('Necesitamos permiso para seleccionar la foto del cheque.');
+      setErrorDialog('Necesitamos permiso para seleccionar la foto del cheque.');
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: true,
+      base64: Platform.OS === 'web',
       mediaTypes: ['images'],
       quality: 0.75
     });
 
     if (!result.canceled) {
-      updateField('checkImageUri', result.assets[0].uri);
+      const asset = result.assets[0];
+      const checkImageUri =
+        Platform.OS === 'web' && asset.base64
+          ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
+          : asset.uri;
+
+      updateField('checkImageUri', checkImageUri);
     }
   }
 
   async function save() {
-    setError('');
+    setErrorDialog('');
     setLoading(true);
 
     try {
       const paymentCount = await addPaymentMethod(user.clienteId, form);
       onSaved({ ...user, paymentCount });
     } catch (saveError) {
-      setError(saveError.message);
+      setErrorDialog(saveError.message);
     } finally {
       setLoading(false);
     }
@@ -95,6 +103,11 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
       <LinearGradient
         colors={[colors.surfaceLowest, colors.surface, colors.surfaceLow]}
         style={StyleSheet.absoluteFill}
+      />
+      <ErrorDialog
+        message={errorDialog}
+        onClose={() => setErrorDialog('')}
+        visible={Boolean(errorDialog)}
       />
 
       <View style={styles.topBar}>
@@ -144,8 +157,6 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
             <Text style={styles.currencyNoticeText}>Todas las operaciones se manejan en pesos argentinos.</Text>
           </View>
         </View>
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable disabled={loading} onPress={save} style={styles.primaryButton}>
           <LinearGradient
@@ -377,13 +388,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontWeight: '800'
-  },
-  error: {
-    color: colors.error,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18,
-    marginBottom: 14
   },
   field: {
     flex: 1,

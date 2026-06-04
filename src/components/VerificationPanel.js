@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { completeVerification, resendVerificationEmail } from '../backend/authService';
+import ErrorDialog from './ErrorDialog';
 import { colors, radii } from '../theme';
 
 export default function VerificationPanel({
@@ -16,7 +17,7 @@ export default function VerificationPanel({
   const [resending, setResending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [errorDialog, setErrorDialog] = useState('');
   const passwordStatus = useMemo(() => getPasswordStatus(form.password, form.confirmPassword), [form.password, form.confirmPassword]);
   const canSubmit =
     form.code.replace(/\D/g, '').length === 6 &&
@@ -33,7 +34,7 @@ export default function VerificationPanel({
 
   function setFeedback(nextMessage, nextError = '') {
     setMessage(nextMessage);
-    setError(nextError);
+    setErrorDialog(nextError);
     onMessage?.(nextMessage || nextError);
   }
 
@@ -57,6 +58,28 @@ export default function VerificationPanel({
 
   async function submitCode() {
     setFeedback('');
+
+    if (!form.code.trim()) {
+      setFeedback('', 'Ingresa el codigo de un solo uso que recibiste por mail.');
+      return;
+    }
+    if (form.code.replace(/\D/g, '').length !== 6) {
+      setFeedback('', 'El codigo debe tener 6 digitos.');
+      return;
+    }
+    if (!form.password.trim()) {
+      setFeedback('', 'Ingresa una nueva contrasena.');
+      return;
+    }
+    if (!form.confirmPassword.trim()) {
+      setFeedback('', 'Confirma tu nueva contrasena.');
+      return;
+    }
+    if (!canSubmit) {
+      setFeedback('', 'Revisa los requisitos de la contrasena antes de confirmar.');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -78,6 +101,11 @@ export default function VerificationPanel({
 
   return (
     <View style={[styles.card, compact && styles.cardCompact]}>
+      <ErrorDialog
+        message={errorDialog}
+        onClose={() => setErrorDialog('')}
+        visible={Boolean(errorDialog)}
+      />
       {showHeader ? (
         <View style={styles.header}>
           <View style={styles.icon}>
@@ -123,7 +151,7 @@ export default function VerificationPanel({
           {resending ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.secondaryButtonText}>Reenviar codigo</Text>}
         </Pressable>
         <Pressable
-          disabled={submitting || !canSubmit}
+          disabled={submitting}
           onPress={submitCode}
           style={[styles.primaryButton, !canSubmit && styles.primaryButtonDisabled]}
         >
@@ -131,7 +159,6 @@ export default function VerificationPanel({
         </Pressable>
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       {message ? <Text style={styles.message}>{message}</Text> : null}
     </View>
   );
@@ -188,13 +215,6 @@ const styles = StyleSheet.create({
   },
   copy: {
     flex: 1
-  },
-  error: {
-    color: colors.error,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 18,
-    marginTop: 12
   },
   field: {
     marginBottom: 14

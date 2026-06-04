@@ -24,10 +24,10 @@ const tabs = [
     label: 'Favoritos'
   },
   {
-    activeIcon: 'shopping',
-    icon: 'shopping-outline',
+    activeIcon: 'package-variant',
+    icon: 'package-variant-closed',
     key: 'purchases',
-    label: 'Compras'
+    label: 'Mis ventas'
   },
   {
     activeIcon: 'account',

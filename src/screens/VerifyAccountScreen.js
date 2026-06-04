@@ -7,6 +7,8 @@ import VerificationPanel from '../components/VerificationPanel';
 import { colors, radii, shadows } from '../theme';
 
 export default function VerifyAccountScreen({ onContinueAsGuest, onVerified, user }) {
+  const emailSent = user?.verificationEmailSent !== false;
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={[colors.surfaceLowest, colors.surface, colors.surfaceLow]} style={StyleSheet.absoluteFill} />
@@ -16,9 +18,13 @@ export default function VerifyAccountScreen({ onContinueAsGuest, onVerified, use
             <MaterialCommunityIcons color={colors.onPrimaryFixed} name="email-lock-outline" size={34} />
           </View>
           <Text style={styles.eyebrow}>Verificacion de cuenta</Text>
-          <Text style={styles.title}>Te enviamos un codigo</Text>
+          <Text style={styles.title}>
+            {emailSent ? 'Te enviamos un codigo' : 'Codigo pendiente'}
+          </Text>
           <Text style={styles.copy}>
-            Ingresalo para crear tu contrasena y activar todas las funciones. Mientras tanto podes continuar como invitado.
+            {emailSent
+              ? 'Ingresalo para crear tu contrasena y activar todas las funciones. Mientras tanto podes continuar como invitado.'
+              : 'No pudimos enviar el mail todavia. Revisa la configuracion SMTP o toca reenviar codigo.'}
           </Text>
           <View style={styles.mailPill}>
             <MaterialCommunityIcons color={colors.primary} name="email-outline" size={16} />
@@ -26,7 +32,10 @@ export default function VerifyAccountScreen({ onContinueAsGuest, onVerified, use
           </View>
         </View>
 
-        <VerificationPanel email={user.email} onVerified={onVerified} />
+        <VerificationPanel
+          email={user.email}
+          onVerified={onVerified}
+        />
 
         <Pressable onPress={onContinueAsGuest} style={styles.guestButton}>
           <Text style={styles.guestButtonText}>Continuar como invitado</Text>

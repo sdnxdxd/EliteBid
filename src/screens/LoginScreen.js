@@ -14,23 +14,34 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { login } from '../backend/authService';
+import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 
 export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [errorDialog, setErrorDialog] = useState('');
 
   async function handleLogin() {
-    setError('');
+    setErrorDialog('');
+
+    if (!email.trim()) {
+      setErrorDialog('Ingresa tu correo para iniciar sesion.');
+      return;
+    }
+    if (!password.trim()) {
+      setErrorDialog('Ingresa tu clave o codigo de verificacion.');
+      return;
+    }
+
     setLoading(true);
 
     try {
       const user = await login(email, password);
       onLogin(user);
     } catch (loginError) {
-      setError(loginError.message);
+      setErrorDialog(loginError.message);
     } finally {
       setLoading(false);
     }
@@ -44,6 +55,11 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
       <LinearGradient
         colors={[colors.surfaceLowest, colors.surface, colors.surfaceContainer]}
         style={StyleSheet.absoluteFill}
+      />
+      <ErrorDialog
+        message={errorDialog}
+        onClose={() => setErrorDialog('')}
+        visible={Boolean(errorDialog)}
       />
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -90,8 +106,6 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
           <Pressable onPress={onForgotPassword} style={styles.forgotButton}>
             <Text style={styles.forgotButtonText}>Olvide mi contrasena</Text>
           </Pressable>
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable disabled={loading} onPress={handleLogin} style={styles.primaryButton}>
             <LinearGradient
@@ -162,13 +176,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 96,
     ...shadows.ambient
-  },
-  error: {
-    color: colors.error,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-    marginBottom: 14
   },
   fieldGroup: {
     marginBottom: 16
