@@ -2259,8 +2259,8 @@ const port = Number(process.env.API_PORT || 3001);
 
 async function start() {
   if (process.env.DB_AUTO_INIT !== 'false') await initDatabase();
-  app.listen(port, () => {
-    console.log(`EliteBid API escuchando en http://127.0.0.1:${port}/api`);
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`EliteBid API escuchando en http://0.0.0.0:${port}/api`);
   });
 }
 

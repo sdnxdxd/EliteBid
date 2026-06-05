@@ -14,7 +14,7 @@ Clonar el proyecto:
 ```bash
 git clone https://github.com/Samtu79/EliteBid.git
 cd EliteBid
-git checkout informe-segunda-entrega
+git checkout main
 ```
 
 Instalar dependencias:
@@ -104,6 +104,23 @@ Abrir:
 http://localhost:3002
 ```
 
+### Probar desde un celular
+
+Para probar la app desde el celular:
+
+1. La PC y el celular tienen que estar en la misma red WiFi.
+2. Levantar el backend con `npm run api`.
+3. El backend queda escuchando en todas las interfaces de red, no solo en `127.0.0.1`.
+4. Levantar Expo con `npm start` si se usa Expo Go, o `npm run web -- --port 3002` si se prueba desde navegador.
+5. En Expo Go, la app detecta la IP LAN de la PC desde la URL de Expo y conecta al backend en `http://IP_DE_LA_PC:3001/api`.
+
+Si desde el celular no conecta:
+
+- Revisar que Windows Firewall permita conexiones entrantes a Node.js.
+- Confirmar la IPv4 de la PC con `ipconfig`.
+- Desde el navegador del celular abrir `http://IP_DE_LA_PC:3001/api/health`.
+- Si ese endpoint no abre, el problema es red/firewall, no la app.
+
 ## 5. Usuario de prueba
 
 ```text
@@ -180,6 +197,8 @@ Clave o codigo: codigo de un solo uso recibido por mail
 ```
 
 Luego vuelve a la pantalla de verificacion para crear la contrasena definitiva.
+
+Si el codigo ya vencio y el invitado cerro sesion, no puede entrar con ese codigo viejo. En ese caso, desde Login debe completar el correo de la cuenta pendiente y tocar `Reenviar codigo de invitado`. La app pide un codigo nuevo al backend, lo manda por mail y deja ese nuevo codigo valido por otros 15 minutos.
 
 ### Agregar medio de pago
 

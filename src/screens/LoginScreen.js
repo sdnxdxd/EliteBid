@@ -13,7 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { login } from '../backend/authService';
+import { login, resendVerificationEmail } from '../backend/authService';
 import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 
@@ -21,10 +21,13 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [message, setMessage] = useState('');
   const [errorDialog, setErrorDialog] = useState('');
 
   async function handleLogin() {
     setErrorDialog('');
+    setMessage('');
 
     if (!email.trim()) {
       setErrorDialog('Ingresa tu correo para iniciar sesion.');
@@ -44,6 +47,31 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
       setErrorDialog(loginError.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleResendCode() {
+    setErrorDialog('');
+    setMessage('');
+
+    if (!email.trim()) {
+      setErrorDialog('Ingresa el correo de la cuenta pendiente para reenviar el codigo.');
+      return;
+    }
+
+    setResending(true);
+
+    try {
+      const result = await resendVerificationEmail(email);
+      setMessage(
+        result.verificationEmailSent
+          ? 'Te reenviamos el codigo de un solo uso.'
+          : 'La cuenta sigue pendiente. Si el mail no llega, revisa SMTP o intenta de nuevo.'
+      );
+    } catch (resendError) {
+      setErrorDialog(resendError.message);
+    } finally {
+      setResending(false);
     }
   }
 
@@ -106,6 +134,19 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister }) {
           <Pressable onPress={onForgotPassword} style={styles.forgotButton}>
             <Text style={styles.forgotButtonText}>Olvide mi contrasena</Text>
           </Pressable>
+
+          <Pressable disabled={resending} onPress={handleResendCode} style={styles.resendButton}>
+            {resending ? (
+              <ActivityIndicator color={colors.primary} size="small" />
+            ) : (
+              <>
+                <MaterialCommunityIcons color={colors.primary} name="email-sync-outline" size={16} />
+                <Text style={styles.resendButtonText}>Reenviar codigo de invitado</Text>
+              </>
+            )}
+          </Pressable>
+
+          {message ? <Text style={styles.message}>{message}</Text> : null}
 
           <Pressable disabled={loading} onPress={handleLogin} style={styles.primaryButton}>
             <LinearGradient
@@ -232,6 +273,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     overflow: 'hidden'
   },
+  message: {
+    color: '#73E6A2',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginBottom: 12
+  },
   primaryButtonFill: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -253,6 +301,22 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: 'center',
     marginTop: 12
+  },
+  resendButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 14,
+    marginTop: -4,
+    minHeight: 28,
+    paddingVertical: 3
+  },
+  resendButtonText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   secondaryButtonText: {
     color: colors.primary,

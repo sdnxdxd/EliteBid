@@ -47,6 +47,7 @@
 - Pasaporte acepta letras/numeros en mayuscula.
 - El invitado pendiente puede volver a entrar usando mail + codigo OTP.
 - El OTP vence a los 15 minutos.
+- Si el OTP vence y el invitado cerro sesion, puede pedir otro desde Login con `Reenviar codigo de invitado`.
 - El OTP se guarda hasheado, no en texto plano.
 - La contrasena definitiva se guarda hasheada con `scrypt`.
 - Se unificaron reglas de contrasena en verificacion y recuperacion:
