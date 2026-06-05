@@ -6,6 +6,7 @@
   "scripts": {
     "start": "expo start",
     "api": "node server/index.js",
+    "qa:flow": "node scripts/qa-flow.js",
     "db:init": "node server/initDatabase.js",
     "android": "expo start --android",
     "ios": "expo start --ios",

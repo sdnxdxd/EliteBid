@@ -12,10 +12,11 @@
 
 ```bash
 npm run web -- --port 3002
+npm run qa:flow
 npx expo export --platform web
 ```
 
-Resultado esperado: el bundle compila sin errores y la app carga la pantalla de login.
+Resultado esperado: el flujo automatizado pasa completo, el bundle compila sin errores y la app carga la pantalla de login.
 
 ## Checklist funcional
 
@@ -84,6 +85,6 @@ Resultado esperado: el bundle compila sin errores y la app carga la pantalla de 
 ## Riesgos pendientes
 
 - No se probo en dispositivo fisico Android/iOS.
-- No hay tests automatizados; la validacion fue manual/asistida por navegador.
+- La validacion visual sigue siendo manual/asistida por navegador.
 - El backend sigue siendo local, no un servicio Express deployado.
 - El feed de sala en vivo no usa WebSocket real todavia.

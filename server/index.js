@@ -637,7 +637,7 @@ app.post('/api/subastas/:auctionId/pujas', wrap(async (req, res) => {
 }));
 
 app.get('/api/auctions/home', wrap(async (_req, res) => {
-  const viewer = await getViewer(_req.query.clienteId);
+  const viewer = await getCatalogViewer(_req, _req.query.clienteId);
   const rows = await getAuctionRows(viewer);
   res.json({
     live: rows.filter((auction) => auction.status === 'abierta'),
@@ -646,94 +646,96 @@ app.get('/api/auctions/home', wrap(async (_req, res) => {
 }));
 
 app.get('/api/auctions', wrap(async (_req, res) => {
-  res.json(await getAuctionRows(await getViewer(_req.query.clienteId)));
+  res.json(await getAuctionRows(await getCatalogViewer(_req, _req.query.clienteId)));
 }));
 
 app.get('/api/auctions/:auctionId', wrap(async (req, res) => {
-  res.json(await getAuctionDetail(parsePositiveInt(req.params.auctionId, 'Subasta invalida.'), parsePositiveInt(req.query.clienteId, 'Cliente invalido.')));
+  const viewer = await getCatalogViewer(req, req.query.clienteId);
+  res.json(await getAuctionDetail(parsePositiveInt(req.params.auctionId, 'Subasta invalida.'), viewer?.clienteId));
 }));
 
 app.post('/api/auctions/:auctionId/enter', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.body.clienteId, 'Cliente invalido.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para ingresar a una sala.');
-  res.json(await enterAuctionRoom(clienteId, parsePositiveInt(req.params.auctionId, 'Subasta invalida.')));
+  const viewer = await requireMatchingClient(req, req.body.clienteId);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para ingresar a una sala.');
+  res.json(await enterAuctionRoom(viewer.clienteId, parsePositiveInt(req.params.auctionId, 'Subasta invalida.')));
 }));
 
 app.post('/api/auctions/:auctionId/bids', wrap(async (req, res) => {
   const amount = parseMoney(req.body.amount, 'Ingresa un monto valido para pujar.');
-  const clienteId = parsePositiveInt(req.body.clienteId, 'Cliente invalido.');
+  const viewer = await requireMatchingClient(req, req.body.clienteId);
   const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
 
-  const bidResult = await placeAuctionBid(clienteId, auctionId, amount);
+  const bidResult = await placeAuctionBid(viewer.clienteId, auctionId, amount);
   res.json({ auction: bidResult.auction, bid: bidResult.bid });
 }));
 
 app.get('/api/users/:clienteId/summary', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  res.json(await getUserSummary(clienteId));
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  res.json(await getUserSummary(viewer.clienteId));
 }));
 
 app.get('/api/users/:clienteId/favorites/ids', wrap(async (req, res) => {
-  if (await isGuest(parsePositiveInt(req.params.clienteId, 'Cliente invalido.'))) {
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  if (await isGuest(viewer.clienteId)) {
     return res.json([]);
   }
   const rows = await query('SELECT subasta AS auctionId FROM favoritos WHERE cliente = ? ORDER BY creado_en DESC', [
-    parsePositiveInt(req.params.clienteId, 'Cliente invalido.')
+    viewer.clienteId
   ]);
   res.json(rows.map((row) => row.auctionId));
 }));
 
 app.get('/api/users/:clienteId/favorites', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  if (await isGuest(clienteId)) return res.json([]);
-  res.json(await getFavoriteAuctions(clienteId));
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  if (await isGuest(viewer.clienteId)) return res.json([]);
+  res.json(await getFavoriteAuctions(viewer.clienteId));
 }));
 
 app.post('/api/users/:clienteId/favorites/:auctionId/toggle', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
   const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para guardar favoritos.');
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para guardar favoritos.');
   const existing = await first('SELECT 1 AS found FROM favoritos WHERE cliente = ? AND subasta = ?', [
-    clienteId,
+    viewer.clienteId,
     auctionId
   ]);
 
   if (existing) {
-    await run('DELETE FROM favoritos WHERE cliente = ? AND subasta = ?', [clienteId, auctionId]);
+    await run('DELETE FROM favoritos WHERE cliente = ? AND subasta = ?', [viewer.clienteId, auctionId]);
   } else {
-    await run('INSERT INTO favoritos (cliente, subasta) VALUES (?, ?)', [clienteId, auctionId]);
+    await run('INSERT INTO favoritos (cliente, subasta) VALUES (?, ?)', [viewer.clienteId, auctionId]);
   }
 
   const rows = await query('SELECT subasta AS auctionId FROM favoritos WHERE cliente = ? ORDER BY creado_en DESC', [
-    clienteId
+    viewer.clienteId
   ]);
   res.json(rows.map((row) => row.auctionId));
 }));
 
 app.get('/api/users/:clienteId/purchases', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  if (await isGuest(clienteId)) return res.json([]);
-  res.json(await getUserPurchases(clienteId));
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  if (await isGuest(viewer.clienteId)) return res.json([]);
+  res.json(await getUserPurchases(viewer.clienteId));
 }));
 
 app.get('/api/users/:clienteId/lots', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  if (await isGuest(clienteId)) return res.json([]);
-  res.json(await getUserLots(clienteId));
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  if (await isGuest(viewer.clienteId)) return res.json([]);
+  res.json(await getUserLots(viewer.clienteId));
 }));
 
 app.post('/api/users/:clienteId/lots', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para cargar lotes a subasta.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para cargar lotes a subasta.');
   const lot = sanitizeLotSubmission(req.body);
-  await createLotSubmission(clienteId, lot);
-  res.status(201).json(await getUserLots(clienteId));
+  await createLotSubmission(viewer.clienteId, lot);
+  res.status(201).json(await getUserLots(viewer.clienteId));
 }));
 
 app.post('/api/users/:clienteId/purchases/:bidId/settle', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
   const bidId = parsePositiveInt(req.params.bidId, 'Puja invalida.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para registrar compras.');
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para registrar compras.');
   const purchase = await first(
     `SELECT p.identificador AS id, p.importe AS amount, s.identificador AS auctionId,
       prod.identificador AS productId, prod.duenio AS ownerId, i.identificador AS itemId,
@@ -747,7 +749,7 @@ app.post('/api/users/:clienteId/purchases/:bidId/settle', wrap(async (req, res) 
      LEFT JOIN registro_de_subasta r ON r.cliente = a.cliente AND r.subasta = s.identificador AND r.producto = prod.identificador
      WHERE a.cliente = ? AND p.identificador = ? AND p.ganador = 'si'
      LIMIT 1`,
-    [clienteId, bidId]
+    [viewer.clienteId, bidId]
   );
 
   if (!purchase) throw new Error('No encontramos una compra pendiente para esa puja.');
@@ -755,65 +757,66 @@ app.post('/api/users/:clienteId/purchases/:bidId/settle', wrap(async (req, res) 
     await run(
       `INSERT INTO registro_de_subasta (subasta, duenio, producto, cliente, importe, comision)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [purchase.auctionId, purchase.ownerId, purchase.productId, clienteId, purchase.amount, purchase.commission]
+      [purchase.auctionId, purchase.ownerId, purchase.productId, viewer.clienteId, purchase.amount, purchase.commission]
     );
     await run('UPDATE items_catalogo SET subastado = ? WHERE identificador = ?', ['si', purchase.itemId]);
   }
 
-  res.json(await getUserPurchases(clienteId));
+  res.json(await getUserPurchases(viewer.clienteId));
 }));
 
 app.get('/api/users/:clienteId/payments', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  if (await isGuest(clienteId)) return res.json([]);
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  if (await isGuest(viewer.clienteId)) return res.json([]);
   const rows = await query(
     `SELECT identificador AS id, tipo AS type, detalle AS detail, moneda AS currency,
       monto_garantia AS amount, verificado AS verified
      FROM medios_pago
      WHERE cliente = ?
      ORDER BY identificador DESC`,
-    [clienteId]
+    [viewer.clienteId]
   );
   res.json(rows.map((row) => ({ ...row, parsedDetail: parseDetail(row.detail) })));
 }));
 
 app.post('/api/users/:clienteId/payments', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para agregar medios de pago.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para agregar medios de pago.');
   const payment = sanitizePayment(req.body);
   const verified = payment.type === 'cheque' ? 'no' : 'si';
   await run(
     `INSERT INTO medios_pago (cliente, tipo, detalle, moneda, monto_garantia, verificado)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), 'ARS', payment.amount, verified]
+    [viewer.clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), 'ARS', payment.amount, verified]
   );
-  await refreshClientCategory(clienteId);
-  const summary = await first('SELECT COUNT(*) AS paymentCount FROM medios_pago WHERE cliente = ?', [clienteId]);
+  await refreshClientCategory(viewer.clienteId);
+  const summary = await first('SELECT COUNT(*) AS paymentCount FROM medios_pago WHERE cliente = ?', [viewer.clienteId]);
   res.json(summary?.paymentCount ?? 0);
 }));
 
 app.delete('/api/users/:clienteId/payments/:paymentId', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para eliminar medios de pago.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para eliminar medios de pago.');
   await run('DELETE FROM medios_pago WHERE identificador = ? AND cliente = ?', [
     parsePositiveInt(req.params.paymentId, 'Medio de pago invalido.'),
-    clienteId
+    viewer.clienteId
   ]);
-  await refreshClientCategory(clienteId);
-  const summary = await first('SELECT COUNT(*) AS paymentCount FROM medios_pago WHERE cliente = ?', [clienteId]);
+  await refreshClientCategory(viewer.clienteId);
+  const summary = await first('SELECT COUNT(*) AS paymentCount FROM medios_pago WHERE cliente = ?', [viewer.clienteId]);
   res.json(summary?.paymentCount ?? 0);
 }));
 
 app.get('/api/users/:clienteId/profile', wrap(async (req, res) => {
-  const profile = await getUserProfile(parsePositiveInt(req.params.clienteId, 'Cliente invalido.'));
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  const profile = await getUserProfile(viewer.clienteId);
   res.json(profile);
 }));
 
 app.put('/api/users/:clienteId/profile', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para modificar tus datos.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para modificar tus datos.');
   const profile = sanitizeProfile(req.body);
-  await assertImmutableIdentity(clienteId, profile);
+  await assertImmutableIdentity(viewer.clienteId, profile);
 
   const duplicate = await first('SELECT id FROM usuarios WHERE lower(email) = ? AND id <> ?', [
     profile.email,
@@ -821,35 +824,35 @@ app.put('/api/users/:clienteId/profile', wrap(async (req, res) => {
   ]);
   if (duplicate) throw new Error('Ese correo ya esta usado por otro usuario.');
 
-  await run('UPDATE personas SET direccion = ? WHERE identificador = ?', [profile.legalAddress, clienteId]);
+  await run('UPDATE personas SET direccion = ? WHERE identificador = ?', [profile.legalAddress, viewer.clienteId]);
   await run('UPDATE usuarios SET email = ? WHERE id = ?', [profile.email, profile.userId]);
   res.json({ email: profile.email });
 }));
 
 app.put('/api/users/:clienteId/profile/photo', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para modificar tu foto.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para modificar tu foto.');
   const photoUri = sanitizeUri(req.body.photoUri, 'Selecciona una foto para actualizar tu perfil.');
   await run('UPDATE personas SET foto_uri = ? WHERE identificador = ?', [
     photoUri,
-    clienteId
+    viewer.clienteId
   ]);
   res.json({ ok: true });
 }));
 
 app.get('/api/users/:clienteId/penalties', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
-  if (await isGuest(clienteId)) return res.json([]);
-  res.json(await getUserPenalties(clienteId));
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  if (await isGuest(viewer.clienteId)) return res.json([]);
+  res.json(await getUserPenalties(viewer.clienteId));
 }));
 
 app.post('/api/users/:clienteId/penalties/:penaltyId/settle', wrap(async (req, res) => {
-  const clienteId = parsePositiveInt(req.params.clienteId, 'Cliente invalido.');
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
   const penaltyId = parsePositiveInt(req.params.penaltyId, 'Penalidad invalida.');
-  await assertNotGuest(clienteId, 'Verifica tu cuenta para resolver penalidades.');
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para resolver penalidades.');
   const penalty = await first(
     'SELECT identificador AS id, estado AS status FROM penalidades WHERE identificador = ? AND cliente = ? LIMIT 1',
-    [penaltyId, clienteId]
+    [penaltyId, viewer.clienteId]
   );
   if (!penalty) throw new Error('No encontramos esa penalidad.');
   if (penalty.status !== 'activa' && penalty.status !== 'vencida') {
@@ -858,10 +861,10 @@ app.post('/api/users/:clienteId/penalties/:penaltyId/settle', wrap(async (req, r
   await run('UPDATE penalidades SET estado = ? WHERE identificador = ? AND cliente = ?', [
     'pagada',
     penaltyId,
-    clienteId
+    viewer.clienteId
   ]);
-  await refreshClientCategory(clienteId);
-  res.json(await getUserPenalties(clienteId));
+  await refreshClientCategory(viewer.clienteId);
+  res.json(await getUserPenalties(viewer.clienteId));
 }));
 
 async function getAuctionRows(viewer = null) {
@@ -1014,13 +1017,24 @@ async function getViewer(clienteId) {
   if (!clienteId) return null;
 
   return first(
-    `SELECT u.rol, u.email_verificado AS emailVerified, c.categoria
+    `SELECT u.cliente_id AS clienteId, u.rol, u.email_verificado AS emailVerified, c.categoria
      FROM usuarios u
      JOIN clientes c ON c.identificador = u.cliente_id
      WHERE u.cliente_id = ?
      LIMIT 1`,
     [Number(clienteId)]
   );
+}
+
+async function getCatalogViewer(req, clienteId) {
+  const requestedClientId = clienteId ? parsePositiveInt(clienteId, 'Cliente invalido.') : null;
+  const viewer = await getOptionalAuthenticatedClient(req);
+
+  if (!requestedClientId) return viewer;
+  if (!viewer) return null;
+  if (Number(viewer.clienteId) !== Number(requestedClientId)) return null;
+
+  return viewer;
 }
 
 async function getOptionalAuthenticatedClient(req) {
@@ -1043,6 +1057,17 @@ async function getOptionalAuthenticatedClient(req) {
   const pendingGuest = session.rol === 'invitado' && session.estado === 'pendiente';
   if ((session.estado !== 'activo' && !pendingGuest) || session.admitido !== 'si') return null;
   return session;
+}
+
+async function requireMatchingClient(req, clienteId) {
+  const requestedClientId = parsePositiveInt(clienteId, 'Cliente invalido.');
+  const viewer = await requireAuthenticatedClient(req);
+
+  if (Number(viewer.clienteId) !== Number(requestedClientId)) {
+    throw new Error('No tenes permisos para operar sobre esta cuenta.');
+  }
+
+  return viewer;
 }
 
 async function requireAuthenticatedClient(req) {
@@ -1532,15 +1557,17 @@ async function sendVerificationForUser({ email, name, token }) {
     return { sent: false, skipped: false, reason: 'send_failed' };
   });
 
-  return Promise.race([
-    sendPromise,
-    new Promise((resolve) => {
-      setTimeout(() => {
-        console.warn(`Envio de verificacion a ${email} demorado. La cuenta queda pendiente y puede reintentar.`);
-        resolve({ sent: false, skipped: false, reason: 'send_timeout' });
-      }, timeoutMs);
-    })
-  ]);
+  let timeoutId;
+  const timeoutPromise = new Promise((resolve) => {
+    timeoutId = setTimeout(() => {
+      console.warn(`Envio de verificacion a ${email} demorado. La cuenta queda pendiente y puede reintentar.`);
+      resolve({ sent: false, skipped: false, reason: 'send_timeout' });
+    }, timeoutMs);
+  });
+
+  const result = await Promise.race([sendPromise, timeoutPromise]);
+  clearTimeout(timeoutId);
+  return result;
 }
 
 async function assertPendingGuestCode(user, codeValue) {
