@@ -19,6 +19,7 @@ const BASE_URL = `http://127.0.0.1:${PORT}/api`;
 const RUN_ID = Date.now();
 const PASSWORD = 'QaFlow!2203';
 const RESET_PASSWORD = 'QaFlow!3304';
+const QA_GUARANTEE_AMOUNT = 10000000;
 const OTP = '654321';
 
 let server;
@@ -127,10 +128,23 @@ async function verifyGuest(db, guest) {
 
 async function cleanup(db, touched = {}) {
   if (touched.itemId && touched.previousBid != null) {
-    await db.query('UPDATE items_catalogo SET puja_actual = ?, subastado = COALESCE(?, subastado) WHERE identificador = ?', [
+    await db.query(
+      `UPDATE items_catalogo
+       SET puja_actual = ?, subastado = COALESCE(?, subastado),
+         timer_inicio = NULL, timer_vencimiento = NULL,
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ?`,
+      [
       touched.previousBid,
       touched.previousSubastado ?? null,
       touched.itemId
+      ]
+    );
+  }
+  if (touched.auctionId && touched.previousAuctionStatus) {
+    await db.query('UPDATE subastas SET estado = ? WHERE identificador = ?', [
+      touched.previousAuctionStatus,
+      touched.auctionId
     ]);
   }
 
@@ -179,6 +193,13 @@ function validLotPayload() {
     returnChargeAccepted: true,
     photoUris: Array.from({ length: 6 }, (_, index) => `file:///qa/lote-${index + 1}.jpg`)
   };
+}
+
+function todaySlashDate() {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${now.getFullYear()}`;
 }
 
 async function main() {
@@ -295,13 +316,39 @@ async function main() {
           cvv: '12'
         })
       }), 'cvv');
+    await expectReject('tarjeta con demasiados numeros rechazada', () =>
+      request(`/users/${userA.clienteId}/payments`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({
+          type: 'tarjeta',
+          amount: 100000,
+          cardHolder: 'qa robustez',
+          cardNumber: '41111111111111111199',
+          expiry: '12/30',
+          cvv: '123'
+        })
+      }), 'tarjeta');
+    await expectReject('cheque con fecha futura rechazado', () =>
+      request(`/users/${userA.clienteId}/payments`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({
+          type: 'cheque',
+          amount: 100000,
+          bank: 'Banco QA',
+          checkNumber: '123456',
+          issueDate: '31/12/2099',
+          checkImageUri: 'file:///qa/cheque.jpg'
+        })
+      }), 'futura');
 
     await request(`/users/${userA.clienteId}/payments`, {
       method: 'POST',
       token: userA.sessionToken,
       body: JSON.stringify({
         type: 'tarjeta',
-        amount: 100000,
+        amount: QA_GUARANTEE_AMOUNT,
         cardHolder: 'qa robustez',
         cardNumber: '4111111111111111',
         expiry: '12/30',
@@ -309,6 +356,36 @@ async function main() {
       })
     });
     logOk('pago valido agregado');
+    await request(`/users/${userA.clienteId}/payments`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({
+        type: 'cheque',
+        amount: QA_GUARANTEE_AMOUNT,
+        bank: 'Banco QA',
+        checkNumber: '123456',
+        issueDate: todaySlashDate(),
+        checkImageUri: 'file:///qa/cheque.jpg'
+      })
+    });
+    const userAPayments = await request(`/users/${userA.clienteId}/payments`, { token: userA.sessionToken });
+    if (!userAPayments.some((payment) => payment.type === 'cheque' && payment.verified === 'si')) {
+      throw new Error('El cheque valido no quedo verificado');
+    }
+    logOk('cheque valido queda verificado');
+    await request(`/users/${userB.clienteId}/payments`, {
+      method: 'POST',
+      token: userB.sessionToken,
+      body: JSON.stringify({
+        type: 'tarjeta',
+        amount: QA_GUARANTEE_AMOUNT,
+        cardHolder: 'qa rival',
+        cardNumber: '4111111111111111',
+        expiry: '12/30',
+        cvv: '123'
+      })
+    });
+    logOk('segundo usuario con pago valido');
 
     const notifications = await request('/notificaciones', { token: userA.sessionToken });
     if (!Array.isArray(notifications) || notifications.length === 0) {
@@ -359,9 +436,12 @@ async function main() {
       body: JSON.stringify({ clienteId: userA.clienteId })
     });
     touched.itemId = room.itemId;
+    touched.auctionId = activeCommon.id;
     touched.previousBid = activeCommon.currentBid;
     const [itemRows] = await db.query('SELECT subastado FROM items_catalogo WHERE identificador = ?', [room.itemId]);
     touched.previousSubastado = itemRows[0]?.subastado;
+    const [auctionRows] = await db.query('SELECT estado FROM subastas WHERE identificador = ?', [activeCommon.id]);
+    touched.previousAuctionStatus = auctionRows[0]?.estado;
     logOk('entrada valida a sala');
 
     await expectReject('puja baja rechazada', () =>
@@ -380,16 +460,67 @@ async function main() {
     if (Number(bid.auction.currentBid) !== validAmount) throw new Error('La puja valida no actualizo la subasta');
     logOk('puja valida actualiza subasta');
 
+    await expectReject('lider activo no puede ofertar otra vez', () =>
+      request(`/auctions/${activeCommon.id}/bids`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({
+          clienteId: userA.clienteId,
+          amount: validAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02)
+        })
+      }), 'vas primero');
+
+    const rivalAmount = validAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02);
+    const rivalBid = await request(`/auctions/${activeCommon.id}/bids`, {
+      method: 'POST',
+      token: userB.sessionToken,
+      body: JSON.stringify({ clienteId: userB.clienteId, amount: rivalAmount })
+    });
+    if (Number(rivalBid.auction.currentBid) !== rivalAmount) {
+      throw new Error('La puja rival no actualizo la subasta');
+    }
+    logOk('versus usuario B supera a usuario A');
+
+    const outbidNotifications = await request('/notificaciones', { token: userA.sessionToken });
+    if (!outbidNotifications.some((notification) => String(notification.id).startsWith('outbid-'))) {
+      throw new Error('Usuario A no recibio notificacion de sobrepuja');
+    }
+    logOk('usuario superado recibe notificacion');
+
+    const refreshedDetail = await request(`/auctions/${activeCommon.id}?clienteId=${userA.clienteId}`, {
+      token: userA.sessionToken
+    });
+    if (Number(refreshedDetail.currentBid) !== rivalAmount) {
+      throw new Error('Usuario A no ve la puja rival actualizada');
+    }
+    logOk('usuario A ve nuevo precio actualizado');
+
+    const comebackAmount = rivalAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02);
+    const comebackBid = await request(`/auctions/${activeCommon.id}/bids`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({ clienteId: userA.clienteId, amount: comebackAmount })
+    });
+    if (Number(comebackBid.auction.currentBid) !== comebackAmount) {
+      throw new Error('Usuario A no pudo volver a superar la oferta');
+    }
+    logOk('usuario A vuelve a superar la oferta');
+
+    await db.query(
+      "UPDATE items_catalogo SET timer_vencimiento = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 SECOND) WHERE identificador = ?",
+      [room.itemId]
+    );
+    await request(`/auctions/${activeCommon.id}?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
     const purchases = await request(`/users/${userA.clienteId}/purchases`, { token: userA.sessionToken });
-    const pendingPurchase = purchases.find((purchase) => Number(purchase.id) === Number(bid.bid.id));
+    const pendingPurchase = purchases.find((purchase) => Number(purchase.id) === Number(comebackBid.bid.id));
     if (!pendingPurchase || pendingPurchase.paymentStatus !== 'pendiente') {
       throw new Error('La puja ganadora no aparecio como compra pendiente');
     }
-    const settled = await request(`/users/${userA.clienteId}/purchases/${bid.bid.id}/settle`, {
+    const settled = await request(`/users/${userA.clienteId}/purchases/${comebackBid.bid.id}/settle`, {
       method: 'POST',
       token: userA.sessionToken
     });
-    if (!settled.some((purchase) => Number(purchase.id) === Number(bid.bid.id) && purchase.paymentStatus === 'pagada')) {
+    if (!settled.some((purchase) => Number(purchase.id) === Number(comebackBid.bid.id) && purchase.paymentStatus === 'pagada')) {
       throw new Error('La compra no quedo pagada');
     }
     logOk('compra ganadora se registra como pagada');

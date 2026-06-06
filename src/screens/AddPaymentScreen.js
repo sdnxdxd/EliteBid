@@ -294,12 +294,13 @@ function CheckForm({ form, pickCheckImage, updateField }) {
       />
       <Field
         keyboardType="numeric"
-        label="Fecha de emision"
+        label="Fecha de emision del cheque"
         maxLength={10}
         onChangeText={(value) => updateField('issueDate', formatIssueDate(value))}
         placeholder="DD/MM/AAAA"
         value={form.issueDate}
       />
+      <Text style={styles.fieldHint}>No puede ser posterior a la fecha actual.</Text>
       <Pressable onPress={pickCheckImage} style={styles.uploadBox}>
         <MaterialCommunityIcons color={colors.primary} name="camera-plus-outline" size={32} />
         <Text style={styles.uploadTitle}>
@@ -419,6 +420,14 @@ const styles = StyleSheet.create({
   field: {
     flex: 1,
     marginBottom: 15
+  },
+  fieldHint: {
+    color: colors.onSurfaceVariant,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginBottom: 12,
+    marginTop: -8
   },
   formCard: {
     backgroundColor: colors.surfaceContainer,

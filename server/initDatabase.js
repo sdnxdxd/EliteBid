@@ -209,7 +209,7 @@ async function seedDatabase() {
   await seedAuction({
     id: 1,
     title: 'Patek Philippe Grand Complications',
-    date: '2026-06-04',
+    date: '2026-06-06',
     time: '21:30',
     status: 'abierta',
     category: 'platino',
@@ -222,7 +222,7 @@ async function seedDatabase() {
   await seedAuction({
     id: 2,
     title: 'Composicion Abstracta, 1968',
-    date: '2026-06-05',
+    date: '2026-06-06',
     time: '19:00',
     status: 'abierta',
     category: 'oro',
@@ -248,7 +248,7 @@ async function seedDatabase() {
   await seedAuction({
     id: 4,
     title: 'Lote Numismatico Rio de la Plata',
-    date: '2026-06-04',
+    date: '2026-06-06',
     time: '18:30',
     status: 'abierta',
     category: 'comun',
@@ -261,7 +261,7 @@ async function seedDatabase() {
   await seedAuction({
     id: 5,
     title: 'Camara Leica M3 con Optica Summicron',
-    date: '2026-06-04',
+    date: '2026-06-06',
     time: '20:00',
     status: 'abierta',
     category: 'especial',
@@ -274,7 +274,7 @@ async function seedDatabase() {
   await seedAuction({
     id: 6,
     title: 'Juego de Te Ingles de 18 Piezas',
-    date: '2026-06-05',
+    date: '2026-06-06',
     time: '18:00',
     status: 'abierta',
     category: 'plata',
@@ -334,6 +334,22 @@ async function seedAuction(auction) {
     ]
   );
   await run(
+    `UPDATE subastas
+     SET titulo = ?, fecha = ?, hora = ?, estado = ?, ubicacion = ?, categoria = ?, moneda = ?, imagen_uri = ?
+     WHERE identificador = ?`,
+    [
+      auction.title,
+      auction.date,
+      auction.time,
+      auction.status,
+      auction.location,
+      auction.category,
+      'ARS',
+      auction.image,
+      auction.id
+    ]
+  );
+  await run(
     `INSERT IGNORE INTO productos (identificador, fecha, disponible, descripcion_catalogo, descripcion_completa, revisor, duenio, seguro, imagen_uri)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [auction.id, auction.date, 'si', auction.product, auction.product, 2, 3, null, auction.image]
@@ -347,6 +363,14 @@ async function seedAuction(auction) {
     `INSERT IGNORE INTO items_catalogo (identificador, catalogo, producto, precio_base, comision, subastado, puja_actual)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [auction.id, auction.id, auction.id, auction.basePrice, auction.basePrice * 0.12, 'no', auction.currentBid]
+  );
+  await run(
+    `UPDATE items_catalogo
+     SET precio_base = ?, comision = ?, subastado = 'no', puja_actual = ?,
+       timer_inicio = NULL, timer_vencimiento = NULL,
+       cierre_estado = 'esperando_puja', cierre_motivo = NULL
+     WHERE identificador = ?`,
+    [auction.basePrice, auction.basePrice * 0.12, auction.currentBid, auction.id]
   );
 }
 

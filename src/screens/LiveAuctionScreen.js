@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  BackHandler,
   Image,
   Pressable,
   ScrollView,
@@ -107,23 +106,6 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
     return () => clearInterval(poll);
   }, [auctionId, user.clienteId]);
 
-  useEffect(() => {
-    if (!BackHandler?.addEventListener) {
-      return undefined;
-    }
-
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!leadingActive) {
-        return false;
-      }
-
-      showLeadingLock();
-      return true;
-    });
-
-    return () => subscription.remove();
-  }, [leadingActive]);
-
   const rules = useMemo(() => {
     if (!auction) {
       return {
@@ -180,6 +162,9 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
       if (!selectedPaymentId) {
         throw new Error('Selecciona un medio de pago verificado para pujar.');
       }
+      if (leadingActive) {
+        throw new Error('Ya vas primero. Podes salir a mirar otras subastas; te avisamos si te superan.');
+      }
 
       const result = await placeBid(user.clienteId, auctionId, parseCurrency(amount), selectedPaymentId);
 
@@ -199,15 +184,14 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
 
   function showLeadingLock() {
     setToast({
-      message: 'Vas primero en esta subasta. No podes salir hasta que termine o superen tu puja.',
-      tone: 'danger'
+      message: 'Vas primero. Podes salir; si te superan vas a verlo en notificaciones.',
+      tone: 'success'
     });
   }
 
   function guardRoomExit(callback) {
     if (leadingActive) {
       showLeadingLock();
-      return;
     }
 
     callback?.();
@@ -247,6 +231,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
     : 'Pujar';
   const finalized = auction.status === 'cerrada' || auction.closureStatus === 'finalizada';
   const counting = auction.closureStatus === 'en_cuenta' && !finalized;
+  const bidDisabled = sending || finalized || !selectedPaymentId || leadingActive;
 
   return (
     <View style={styles.container}>
@@ -337,13 +322,13 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
           ) : null}
 
           <View style={styles.stepper}>
-            <Pressable disabled={sending || finalized} onPress={() => adjustBid(-1)} style={styles.stepButton}>
+            <Pressable disabled={sending || finalized || leadingActive} onPress={() => adjustBid(-1)} style={styles.stepButton}>
               <MaterialCommunityIcons color={colors.onPrimaryFixed} name="minus" size={24} />
             </Pressable>
             <View style={styles.amountBox}>
               <Text style={styles.amountLabel}>Tu puja</Text>
               <TextInput
-                editable={!finalized && !sending}
+                editable={!finalized && !sending && !leadingActive}
                 keyboardType="numeric"
                 onChangeText={(value) => {
                   setAmount(value);
@@ -357,7 +342,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
                 value={amount}
               />
             </View>
-            <Pressable disabled={sending || finalized} onPress={() => adjustBid(1)} style={styles.stepButton}>
+            <Pressable disabled={sending || finalized || leadingActive} onPress={() => adjustBid(1)} style={styles.stepButton}>
               <MaterialCommunityIcons color={colors.onPrimaryFixed} name="plus" size={24} />
             </Pressable>
           </View>
@@ -401,22 +386,22 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
           </View>
 
           <Pressable
-            disabled={sending || finalized || !selectedPaymentId}
+            disabled={bidDisabled}
             onPress={submitBid}
-            style={[styles.bidButton, (finalized || !selectedPaymentId) && styles.bidButtonDisabled]}
+            style={[styles.bidButton, bidDisabled && styles.bidButtonDisabled]}
           >
             {sending ? (
               <ActivityIndicator color={colors.onPrimaryFixed} />
             ) : (
               <Text numberOfLines={1} style={styles.bidButtonText}>
-                {bidButtonLabel}
+                {leadingActive ? 'Esperando que te superen' : bidButtonLabel}
               </Text>
             )}
           </Pressable>
 
           <Pressable onPress={() => guardRoomExit(onBack)} style={[styles.watchButton, leadingActive && styles.watchButtonLocked]}>
             <Text style={[styles.watchButtonText, leadingActive && styles.watchButtonTextLocked]}>
-              {leadingActive ? 'Esperando cierre de puja' : 'Solo ver subasta'}
+              {leadingActive ? 'Salir y esperar notificacion' : 'Solo ver subasta'}
             </Text>
           </Pressable>
 

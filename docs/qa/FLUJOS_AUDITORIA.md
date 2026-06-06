@@ -34,10 +34,11 @@ El seed borra y recrea solo usuarios `demo.elitebid.*@elitebid.test`.
 | Catalogo | Publico sin precios, cliente con precios, invitado sin subastas activas | OK |
 | Detalle subasta | Cliente ve precio/reglas, invitado bloqueado en activa | OK |
 | Sala en vivo | Sin sesion bloqueado, cliente sin pago bloqueado, cliente con pago entra | OK |
-| Puja | Monto menor rechazado, sesion ajena bloqueada, puja valida actualiza subasta | OK |
+| Puja | Monto menor rechazado, sesion ajena bloqueada, puja valida actualiza subasta, lider no puede ofertar otra vez | OK |
+| Versus de pujas | Usuario A puja, usuario B supera, A recibe notificacion, ve el precio actualizado y vuelve a superar | OK |
 | Compra | Puja ganadora aparece pendiente y puede registrarse como pagada | OK |
 | Favoritos | Invitado bloqueado, cliente puede alternar favorito | OK |
-| Pagos | Tarjeta valida, CVV invalido, cheque pendiente de verificacion | OK |
+| Pagos | Tarjeta valida, tarjeta demasiado larga rechazada, CVV invalido, cheque con fecha futura rechazado, cheque valido verificado | OK |
 | Perfil | Sin sesion bloqueado, sesion ajena bloqueada, documento/nombre inmutables | OK |
 | Categoria | Comun, plata por metricas, progreso desde Perfil | OK |
 | Penalidades | Penalidad activa visible, accion resoluble, frena ascensos | OK |
@@ -54,6 +55,22 @@ El seed borra y recrea solo usuarios `demo.elitebid.*@elitebid.test`.
 - Persistir notificaciones leidas en tabla propia si necesitan auditoria real; ahora se calculan dinamicamente.
 - Agregar WebSocket o polling mas frecuente en sala si quieren que parezca una subasta en vivo real.
 - Probar en dispositivo fisico Android/iOS con la misma WiFi y firewall habilitado.
+
+## Resultado QA 06/06/2026
+
+Se ejecuto `npm run qa:flow` completo con 32 chequeos OK:
+
+- Registro con DNI y pasaporte.
+- Invitado pendiente, OTP vencido y reenvio sin sesion.
+- Login, recuperacion de clave e invalidacion de sesiones viejas.
+- Seguridad por sesion: perfil, pagos, sala y pujas cruzadas bloqueadas.
+- Pagos: tarjeta valida, CVV invalido, tarjeta con numeros de mas, cheque futuro y cheque valido verificado.
+- Lotes: solicitud invalida sin fotos y solicitud valida en inspeccion.
+- Subasta en vivo: entrada, puja baja rechazada, puja valida, bloqueo de ofertar mientras sos lider.
+- Versus: otro usuario supera la oferta, llega notificacion de sobrepuja, el precio se actualiza y el primer usuario puede volver a pujar.
+- Compra: la puja ganadora queda pendiente y luego se registra como pagada.
+
+Tambien se ejecuto `npx expo export --platform web` sin errores de compilacion.
 
 ## Prueba mobile esperada
 

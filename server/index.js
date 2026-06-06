@@ -1077,6 +1077,27 @@ async function resolveBidPayment(clienteId, paymentMethodId, amount) {
   return payment.id;
 }
 
+async function getActiveLeadingBid(clienteId) {
+  await settleExpiredAuctionTimers();
+  return first(
+    `SELECT p.identificador AS bidId, p.importe AS amount, i.identificador AS itemId,
+      s.identificador AS auctionId, s.titulo AS title
+     FROM pujos p
+     JOIN asistentes a ON a.identificador = p.asistente
+     JOIN items_catalogo i ON i.identificador = p.item
+     JOIN catalogos c ON c.identificador = i.catalogo
+     JOIN subastas s ON s.identificador = c.subasta
+     WHERE a.cliente = ?
+       AND p.ganador = 'si'
+       AND i.cierre_estado = 'en_cuenta'
+       AND i.timer_vencimiento > UTC_TIMESTAMP()
+       AND s.estado = 'abierta'
+     ORDER BY i.timer_vencimiento ASC
+     LIMIT 1`,
+    [clienteId]
+  );
+}
+
 async function settleExpiredAuctionTimers() {
   const rows = await query(
     `SELECT i.identificador AS itemId
@@ -1187,6 +1208,10 @@ async function placeAuctionBid(clienteId, auctionId, amount, paymentMethodId = n
   const detail = await enterAuctionRoom(clienteId, auctionId);
   if (detail.closureStatus === 'finalizada' || detail.status === 'cerrada') {
     throw new Error('Esta subasta ya finalizo.');
+  }
+  const activeLeadingBid = await getActiveLeadingBid(clienteId);
+  if (activeLeadingBid) {
+    throw new Error(`Ya vas primero en "${activeLeadingBid.title}". Podes mirar otras subastas, pero no ofertar hasta que te superen o cierre el contador.`);
   }
   const currentBid = Number(detail.currentBid || detail.basePrice || 0);
   const basePrice = Number(detail.basePrice || 0);
@@ -1440,6 +1465,40 @@ async function getUserNotifications(viewer) {
         read: false,
         target: 'purchases',
         title: 'Subasta adjudicada'
+      });
+    }
+
+    const outbid = await first(
+      `SELECT p.identificador AS bidId, p.importe AS previousAmount,
+        winner.importe AS currentAmount, s.identificador AS auctionId, s.titulo AS title
+       FROM pujos p
+       JOIN asistentes a ON a.identificador = p.asistente
+       JOIN items_catalogo i ON i.identificador = p.item
+       JOIN catalogos c ON c.identificador = i.catalogo
+       JOIN subastas s ON s.identificador = c.subasta
+       JOIN pujos winner ON winner.item = i.identificador AND winner.ganador = 'si'
+       JOIN asistentes winnerAssistant ON winnerAssistant.identificador = winner.asistente
+       WHERE a.cliente = ?
+         AND p.ganador = 'no'
+         AND winnerAssistant.cliente <> a.cliente
+         AND i.cierre_estado = 'en_cuenta'
+         AND i.timer_vencimiento > UTC_TIMESTAMP()
+         AND s.estado = 'abierta'
+       ORDER BY p.identificador DESC
+       LIMIT 1`,
+      [viewer.clienteId]
+    );
+
+    if (outbid) {
+      notifications.push({
+        id: `outbid-${outbid.bidId}`,
+        action: 'open_auction',
+        createdAt: new Date().toISOString(),
+        description: `${outbid.title}: te superaron. Tu puja fue ${formatMoney(outbid.previousAmount)} y ahora va ${formatMoney(outbid.currentAmount)}.`,
+        priority: 'alta',
+        read: false,
+        target: `auction:${outbid.auctionId}`,
+        title: 'Te superaron en una subasta'
       });
     }
   }
@@ -2047,7 +2106,7 @@ function sanitizePayment(payload) {
     sanitized.expiry = normalizeExpiry(sanitized.expiry);
     sanitized.cvv = onlyDigits(sanitized.cvv);
 
-    if (sanitized.cardNumber.length < 13 || sanitized.cardNumber.length > 16) {
+    if (sanitized.cardNumber.length < 13 || sanitized.cardNumber.length > 16 || !isValidCardNumber(sanitized.cardNumber)) {
       throw new Error('Ingresa un numero de tarjeta valido.');
     }
     if (!/^\d{3,4}$/.test(sanitized.cvv)) {
@@ -2087,6 +2146,7 @@ function sanitizePayment(payload) {
     sanitized.checkNumber = onlyDigits(sanitized.checkNumber);
     sanitized.issueDate = normalizeDate(sanitized.issueDate, 'Ingresa una fecha de emision valida.');
     sanitized.checkImageUri = sanitizeUri(sanitized.checkImageUri, 'Carga una foto del cheque certificado.');
+    assertNotFutureDate(sanitized.issueDate, 'La fecha de emision del cheque no puede ser futura.');
 
     if (sanitized.checkNumber.length < 4 || sanitized.checkNumber.length > 20) {
       throw new Error('Ingresa un numero de cheque valido.');
@@ -2301,6 +2361,25 @@ function detectCardBrand(value) {
   return 'Tarjeta';
 }
 
+function isValidCardNumber(value = '') {
+  const digits = onlyDigits(value);
+  if (!/^\d{13,16}$/.test(digits)) return false;
+
+  let sum = 0;
+  let shouldDouble = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = Number(digits[index]);
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum % 10 === 0;
+}
+
 function sanitizeProfile(payload) {
   const profile = {
     userId: parsePositiveInt(payload.userId, 'Usuario invalido.'),
@@ -2467,6 +2546,17 @@ function normalizeDate(value = '', message = 'Ingresa una fecha valida.') {
   }
 
   return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function assertNotFutureDate(value = '', message = 'La fecha no puede ser futura.') {
+  const [day, month, year] = String(value).split('/').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
+  if (date.getTime() > todayUtc.getTime()) {
+    throw new Error(message);
+  }
 }
 
 function sanitizeUri(value = '', message = 'Ingresa una ruta valida.') {
