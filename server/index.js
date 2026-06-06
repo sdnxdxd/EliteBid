@@ -324,7 +324,8 @@ app.post('/api/auth/resend-verification', wrap(async (req, res) => {
     `SELECT u.id, u.email, u.nombre
      FROM usuarios u
      JOIN clientes c ON c.identificador = u.cliente_id
-     WHERE ${email ? 'lower(u.email) = ?' : 'c.identificador = ?'}
+     JOIN personas p ON p.identificador = u.cliente_id
+     WHERE ${email ? 'lower(u.email) = ?' : 'p.documento = ?'}
        AND u.rol = 'invitado' AND u.email_verificado = 'no' AND u.estado = 'pendiente'
      LIMIT 1`,
     [email || documentNumber]

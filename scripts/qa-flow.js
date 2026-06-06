@@ -126,6 +126,374 @@ async function verifyGuest(db, guest) {
   return verified;
 }
 
+function guestRegistrationPayload(index, overrides = {}) {
+  const documentType = overrides.documentType || 'dni';
+  const documentNumber =
+    overrides.documentNumber ||
+    (documentType === 'dni' ? `72${String(RUN_ID).slice(-5)}${String(index).padStart(3, '0')}` : `ARQA${RUN_ID}${index}`.slice(0, 14));
+
+  return {
+    email: `qa.robust.${RUN_ID}.auth.${index}@example.com`,
+    firstName: 'qa',
+    lastName: 'registro',
+    documentType,
+    documentNumber,
+    documentFrontUri: 'file:///qa/document-front.jpg',
+    ...(documentType === 'dni' ? { documentBackUri: 'file:///qa/document-back.jpg' } : {}),
+    ...overrides
+  };
+}
+
+async function registerGuestPayload(db, index, overrides = {}) {
+  const body = guestRegistrationPayload(index, overrides);
+  const user = await request('/auth/register-guest', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  await setOtp(db, user.email || body.email);
+  return { ...body, ...user, rawEmail: body.email, email: user.email || body.email };
+}
+
+async function assertStoredUser(db, email, expected = {}) {
+  const [rows] = await db.query(
+    `SELECT u.email, u.nombre AS firstName, u.rol, u.estado,
+      p.nombre AS fullName, p.documento AS documentNumber, p.tipo_documento AS documentType,
+      d.frente_uri AS frontUri, d.dorso_uri AS backUri
+     FROM usuarios u
+     JOIN personas p ON p.identificador = u.cliente_id
+     LEFT JOIN documentos_identidad d ON d.persona_id = p.identificador
+     WHERE lower(u.email) = ?
+     LIMIT 1`,
+    [email.toLowerCase()]
+  );
+  if (!rows.length) throw new Error(`No se encontro usuario ${email}`);
+  const row = rows[0];
+
+  for (const [key, value] of Object.entries(expected)) {
+    if (String(row[key]) !== String(value)) {
+      throw new Error(`${email}: ${key} esperado "${value}", obtenido "${row[key]}"`);
+    }
+  }
+
+  return row;
+}
+
+async function runAuthRegistrationMatrix(db) {
+  await expectReject('auth 01 registro sin email rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(101, { email: '' }))
+    }), 'correo');
+  await expectReject('auth 02 registro email invalido rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(102, { email: 'correo-invalido' }))
+    }), 'correo valido');
+  await expectReject('auth 03 registro sin nombre rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(103, { firstName: '' }))
+    }), 'nombre');
+  await expectReject('auth 04 registro nombre con numeros rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(104, { firstName: 'Juan123' }))
+    }), 'nombre valido');
+  await expectReject('auth 05 registro sin apellido rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(105, { lastName: '' }))
+    }), 'apellido');
+  await expectReject('auth 06 registro apellido con simbolos rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(106, { lastName: 'Perez@' }))
+    }), 'apellido valido');
+  await expectReject('auth 07 registro sin documento rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(107, { documentNumber: '' }))
+    }), 'documento');
+  await expectReject('auth 08 registro dni corto rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(108, { documentNumber: '123' }))
+    }), 'documento valido');
+  await expectReject('auth 09 registro dni largo rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(109, { documentNumber: '1234567890123' }))
+    }), 'documento valido');
+  await expectReject('auth 10 registro dni sin frente rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(110, { documentFrontUri: '' }))
+    }), 'frente');
+  await expectReject('auth 11 registro dni sin dorso rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(111, { documentBackUri: '' }))
+    }), 'dorso');
+  await expectReject('auth 12 registro uri javascript rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(112, { documentFrontUri: 'javascript:alert(1)' }))
+    }), 'frente');
+  await expectReject('auth 13 pasaporte corto rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(113, { documentType: 'pasaporte', documentNumber: 'AB12' }))
+    }), 'pasaporte valido');
+  await expectReject('auth 14 tipo desconocido cae a dni y exige dorso', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...guestRegistrationPayload(114, { documentType: 'cedula' }),
+        documentBackUri: ''
+      })
+    }), 'dorso');
+
+  const normalizedGuest = await registerGuestPayload(db, 115, {
+    email: `  QA.Robust.${RUN_ID}.AUTH.115@Example.COM  `,
+    firstName: 'santiago',
+    lastName: 'santiago',
+    documentNumber: '12.345.675'
+  });
+  const normalizedStored = await assertStoredUser(db, normalizedGuest.email, {
+    email: `qa.robust.${RUN_ID}.auth.115@example.com`,
+    firstName: 'Santiago',
+    fullName: 'Santiago Santiago',
+    documentNumber: '12345675',
+    documentType: 'dni',
+    rol: 'invitado',
+    estado: 'pendiente'
+  });
+  if (normalizedStored.frontUri !== 'file:///qa/document-front.jpg' || normalizedStored.backUri !== 'file:///qa/document-back.jpg') {
+    throw new Error('DNI valido no guardo frente y dorso correctamente');
+  }
+  logOk('auth 15 registro normaliza email nombre apellido y dni');
+
+  const passportGuest = await registerGuestPayload(db, 116, {
+    documentType: 'pasaporte',
+    documentNumber: ' ar-qa 9988 ',
+    documentBackUri: ''
+  });
+  const passportStored = await assertStoredUser(db, passportGuest.email, {
+    documentNumber: 'ARQA9988',
+    documentType: 'pasaporte'
+  });
+  if (passportStored.frontUri !== passportStored.backUri) {
+    throw new Error('Pasaporte valido no reutilizo la foto frontal como dorso interno');
+  }
+  logOk('auth 16 pasaporte valido acepta solo frente');
+
+  await expectReject('auth 17 email duplicado rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(117, { email: normalizedGuest.email }))
+    }), 'correo ya esta registrado');
+  await expectReject('auth 18 documento duplicado rechazado', () =>
+    request('/auth/register-guest', {
+      method: 'POST',
+      body: JSON.stringify(guestRegistrationPayload(118, { documentNumber: '12345675' }))
+    }), 'documento');
+  await expectReject('auth 19 login vacio rechazado', () =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: '', password: '' })
+    }), 'correo y clave');
+  await expectReject('auth 20 login email inexistente rechazado', () =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: `qa.robust.${RUN_ID}.noexiste@example.com`, password: PASSWORD })
+    }), 'incorrectos');
+  await expectReject('auth 21 invitado con codigo incorrecto rechazado', () =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, password: '000000' })
+    }), 'codigo');
+
+  const pendingLogin = await request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: ` QA.ROBUST.${RUN_ID}.AUTH.115@EXAMPLE.COM `, password: OTP })
+  });
+  if (pendingLogin.rol !== 'invitado' || pendingLogin.estado !== 'pendiente' || !pendingLogin.sessionToken) {
+    throw new Error('Login de invitado con OTP vigente no devolvio sesion pendiente');
+  }
+  logOk('auth 22 invitado puede loguear con otp vigente y email normalizado');
+
+  await expectReject('auth 23 completar verificacion email invalido rechazado', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'mal', code: OTP, password: PASSWORD, confirmPassword: PASSWORD })
+    }), 'correo');
+  await expectReject('auth 24 completar verificacion codigo corto rechazado', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: '123', password: PASSWORD, confirmPassword: PASSWORD })
+    }), 'codigo');
+  await expectReject('auth 25 completar verificacion codigo incorrecto rechazado', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: '123456', password: PASSWORD, confirmPassword: PASSWORD })
+    }), 'codigo ingresado');
+  await expectReject('auth 26 password corta rechazada', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: 'A1!', confirmPassword: 'A1!' })
+    }), 'clave');
+  await expectReject('auth 27 password sin numero rechazada', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: 'Clave!!!!', confirmPassword: 'Clave!!!!' })
+    }), 'clave');
+  await expectReject('auth 28 password sin letra rechazada', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: '1234567!', confirmPassword: '1234567!' })
+    }), 'clave');
+  await expectReject('auth 29 password sin simbolo rechazada', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: 'Clave1234', confirmPassword: 'Clave1234' })
+    }), 'clave');
+  await expectReject('auth 30 password con espacios rechazada', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: 'Clave 123!', confirmPassword: 'Clave 123!' })
+    }), 'espacios');
+  await expectReject('auth 31 password confirmacion distinta rechazada', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: PASSWORD, confirmPassword: 'Otra!2203' })
+    }), 'coinciden');
+
+  const verifiedNormalized = await request('/auth/complete-verification', {
+    method: 'POST',
+    token: pendingLogin.sessionToken,
+    body: JSON.stringify({
+      email: normalizedGuest.email,
+      code: OTP,
+      password: PASSWORD,
+      confirmPassword: PASSWORD
+    })
+  });
+  if (verifiedNormalized.rol !== 'cliente' || verifiedNormalized.estado !== 'activo') {
+    throw new Error('Verificacion valida no activo la cuenta normalizada');
+  }
+  logOk('auth 32 completar verificacion valida activa cliente');
+
+  await expectReject('auth 33 no permite verificar dos veces', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, code: OTP, password: PASSWORD, confirmPassword: PASSWORD })
+    }), 'pendiente');
+  await expectReject('auth 34 login cliente con clave incorrecta rechazado', () =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, password: 'Mal!2203' })
+    }), 'incorrectos');
+
+  const activeLogin = await request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: ` ${normalizedGuest.email.toUpperCase()} `, password: PASSWORD })
+  });
+  if (activeLogin.rol !== 'cliente' || activeLogin.estado !== 'activo' || !activeLogin.sessionToken) {
+    throw new Error('Login cliente activo no devolvio sesion');
+  }
+  logOk('auth 35 login cliente activo con email normalizado');
+
+  const expiredGuest = await registerGuestPayload(db, 119);
+  await db.query(
+    'UPDATE usuarios SET verification_code_hash = ?, verification_code_expires_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 MINUTE) WHERE email = ?',
+    [await hashPassword(OTP), expiredGuest.email]
+  );
+  await expectReject('auth 36 otp vencido rechaza login invitado', () =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: expiredGuest.email, password: OTP })
+    }), 'vencio');
+  await expectReject('auth 37 otp vencido rechaza completar verificacion', () =>
+    request('/auth/complete-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: expiredGuest.email, code: OTP, password: PASSWORD, confirmPassword: PASSWORD })
+    }), 'vencio');
+
+  await request('/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email: expiredGuest.email })
+  });
+  const [resentByEmail] = await db.query(
+    'SELECT verification_code_expires_at > UTC_TIMESTAMP() AS activeCode FROM usuarios WHERE email = ?',
+    [expiredGuest.email]
+  );
+  if (!Number(resentByEmail[0]?.activeCode)) throw new Error('Reenvio por email no genero codigo vigente');
+  logOk('auth 38 reenvio por email renueva otp');
+
+  const resendByDocumentGuest = await registerGuestPayload(db, 120, { documentNumber: '76.543.219' });
+  await request('/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ documentNumber: '76.543.219' })
+  });
+  const [resentByDocument] = await db.query(
+    'SELECT verification_code_expires_at > UTC_TIMESTAMP() AS activeCode FROM usuarios WHERE email = ?',
+    [resendByDocumentGuest.email]
+  );
+  if (!Number(resentByDocument[0]?.activeCode)) throw new Error('Reenvio por documento no genero codigo vigente');
+  logOk('auth 39 reenvio por documento funciona');
+
+  await expectReject('auth 40 reenvio cuenta inexistente rechazado', () =>
+    request('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: `qa.robust.${RUN_ID}.faltante@example.com` })
+    }), 'no encontramos');
+  await expectReject('auth 41 reenvio cuenta ya activa rechazado', () =>
+    request('/auth/resend-verification', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email })
+    }), 'no encontramos');
+  await expectReject('auth 42 reset email inexistente rechazado', () =>
+    request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        identifier: `qa.robust.${RUN_ID}.faltante@example.com`,
+        password: RESET_PASSWORD,
+        confirmPassword: RESET_PASSWORD
+      })
+    }), 'no encontramos');
+  await expectReject('auth 43 reset password confirmacion distinta rechazado', () =>
+    request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        identifier: normalizedGuest.email,
+        password: RESET_PASSWORD,
+        confirmPassword: 'Otra!3304'
+      })
+    }), 'coinciden');
+
+  await request('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({
+      identifier: normalizedGuest.email,
+      password: RESET_PASSWORD,
+      confirmPassword: RESET_PASSWORD
+    })
+  });
+  await expectReject('auth 44 reset invalida clave anterior', () =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: normalizedGuest.email, password: PASSWORD })
+    }), 'incorrectos');
+  const resetLogin = await request('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: normalizedGuest.email, password: RESET_PASSWORD })
+  });
+  if (resetLogin.rol !== 'cliente' || resetLogin.estado !== 'activo') {
+    throw new Error('Login con clave reseteada no funciono');
+  }
+  logOk('auth 45 reset permite login con clave nueva');
+}
+
 async function cleanup(db, touched = {}) {
   if (touched.itemId && touched.previousBid != null) {
     await db.query(
@@ -211,6 +579,8 @@ async function main() {
   try {
     await request('/health');
     logOk('api health');
+
+    await runAuthRegistrationMatrix(db);
 
     await expectReject('dni exige frente y dorso', () =>
       request('/auth/register-guest', {

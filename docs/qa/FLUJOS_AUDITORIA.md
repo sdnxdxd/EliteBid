@@ -25,12 +25,12 @@ El seed borra y recrea solo usuarios `demo.elitebid.*@elitebid.test`.
 
 | Flujo | Variantes cubiertas | Estado |
 | --- | --- | --- |
-| Registro | DNI con frente/dorso, pasaporte con una sola foto, documento duplicado, mail duplicado | OK |
+| Registro | DNI con frente/dorso, pasaporte con una sola foto, documento duplicado, mail duplicado, campos vacios, email invalido, URIs inseguras | OK |
 | Invitado pendiente | Ve solo futuras, no ve precios, no favoritos, no pagos, no pujas | OK |
-| Codigo OTP | Vigente, incorrecto, vencido, reenvio sin sesion | OK |
-| Verificacion | Crea clave definitiva, valida letra/numero/simbolo, activa cuenta | OK |
-| Login | Cliente activo, invitado con OTP, clave anterior tras reset, credenciales invalidas | OK |
-| Recuperar clave | Clave debil rechazada, reset valido invalida sesiones | OK |
+| Codigo OTP | Vigente, incorrecto, corto, vencido, reenvio por email, reenvio por documento | OK |
+| Verificacion | Crea clave definitiva, valida letra/numero/simbolo, sin espacios, confirmacion coincidente, activa cuenta | OK |
+| Login | Cliente activo, invitado con OTP, email normalizado, clave anterior tras reset, credenciales invalidas | OK |
+| Recuperar clave | Cuenta inexistente, clave debil, confirmacion distinta, reset valido invalida sesiones | OK |
 | Catalogo | Publico sin precios, cliente con precios, invitado sin subastas activas | OK |
 | Detalle subasta | Cliente ve precio/reglas, invitado bloqueado en activa | OK |
 | Sala en vivo | Sin sesion bloqueado, cliente sin pago bloqueado, cliente con pago entra | OK |
@@ -71,6 +71,20 @@ Se ejecuto `npm run qa:flow` completo con 32 chequeos OK:
 - Compra: la puja ganadora queda pendiente y luego se registra como pagada.
 
 Tambien se ejecuto `npx expo export --platform web` sin errores de compilacion.
+
+## Resultado QA Auth 06/06/2026
+
+Se agrego una matriz dedicada de login/registro/verificacion con 45 casos OK. El `npm run qa:flow` completo quedo en 77 chequeos OK:
+
+- Registro invalido: sin email, email mal formado, sin nombre, nombre con numeros, sin apellido, apellido con simbolos, sin documento, DNI corto, DNI largo, sin frente, sin dorso, URI `javascript:`, pasaporte corto, tipo desconocido tratado como DNI.
+- Registro valido: normalizacion de email, nombre, apellido y DNI; pasaporte con una sola foto; rechazo de email duplicado y documento duplicado.
+- Login invitado: email inexistente, codigo incorrecto, OTP vigente con email en mayusculas/espacios, OTP vencido.
+- Verificacion: email invalido, codigo corto, codigo incorrecto, clave corta, sin numero, sin letra, sin simbolo, con espacios, confirmacion distinta, verificacion valida y doble verificacion rechazada.
+- Login cliente: clave incorrecta rechazada, email normalizado aceptado, login activo correcto.
+- Reenvio: email vigente, documento vigente, cuenta inexistente y cuenta ya activa.
+- Reset: cuenta inexistente, confirmacion distinta, invalidacion de clave anterior y login con clave nueva.
+
+Bug encontrado y corregido: el reenvio de codigo por documento buscaba contra `clientes.identificador`; ahora busca contra `personas.documento`, que es el dato ingresado por el usuario.
 
 ## Prueba mobile esperada
 
