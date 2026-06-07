@@ -12,7 +12,7 @@ require('dotenv').config();
 const app = express();
 const SESSION_DAYS = 7;
 const BID_TIMER_SECONDS = 60;
-const COMPANY_CLIENT_ID = 900001;
+const COMPANY_CLIENT_ID = 4;
 const SHIPPING_COST = 25000;
 const categoryRank = { comun: 1, especial: 2, plata: 3, oro: 4, platino: 5 };
 const categoryRequirements = [

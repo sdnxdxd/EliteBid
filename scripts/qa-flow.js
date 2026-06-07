@@ -620,6 +620,16 @@ async function cleanup(db, touched = {}) {
     await db.query('DELETE FROM clientes WHERE identificador = ?', [row.clienteId]);
     await db.query('DELETE FROM personas WHERE identificador = ?', [row.clienteId]);
   }
+
+  await resetAutoIncrement(db, 'usuarios', 'id');
+  await resetAutoIncrement(db, 'personas', 'identificador');
+  await resetAutoIncrement(db, 'documentos_identidad', 'identificador');
+}
+
+async function resetAutoIncrement(db, table, primaryKey) {
+  const [rows] = await db.query(`SELECT COALESCE(MAX(${primaryKey}), 0) + 1 AS nextId FROM ${table}`);
+  const nextId = Math.max(1, Number(rows[0]?.nextId || 1));
+  await db.query(`ALTER TABLE ${table} AUTO_INCREMENT = ${nextId}`);
 }
 
 function validLotPayload() {

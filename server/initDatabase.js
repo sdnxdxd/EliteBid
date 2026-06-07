@@ -172,13 +172,16 @@ async function seedDatabase() {
   await run(
     `INSERT IGNORE INTO personas (identificador, documento, nombre, direccion, estado)
      VALUES (?, ?, ?, ?, ?)`,
-    [900001, '00000000', 'Empresa EliteBid', 'Av. Alvear 1800, CABA', 'activo']
+    [4, '00000000', 'Empresa EliteBid', 'Av. Alvear 1800, CABA', 'activo']
   );
   await run(
     `INSERT IGNORE INTO clientes (identificador, numero_pais, admitido, categoria, verificador)
      VALUES (?, ?, ?, ?, ?)`,
-    [900001, 32, 'si', 'platino', 2]
+    [4, 32, 'si', 'platino', 2]
   );
+  await run('UPDATE registro_de_subasta SET cliente = ? WHERE cliente = ?', [4, 900001]);
+  await run('DELETE FROM clientes WHERE identificador = ?', [900001]);
+  await run('DELETE FROM personas WHERE identificador = ?', [900001]);
   await run("UPDATE clientes SET categoria = 'platino' WHERE identificador = ?", [1]);
   await run(
     `INSERT IGNORE INTO duenios (identificador, numero_pais, verificacion_financiera, verificacion_judicial, calificacion_riesgo, verificador)

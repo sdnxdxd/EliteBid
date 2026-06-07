@@ -23,6 +23,8 @@ export default function ResetPasswordScreen({ onBack }) {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [step, setStep] = useState('request');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -153,14 +155,40 @@ export default function ResetPasswordScreen({ onBack }) {
               label="Nueva contrasena"
               onChangeText={setPassword}
               placeholder="Ingresa tu nueva clave"
-              secureTextEntry
+              rightAccessory={(
+                <Pressable
+                  accessibilityLabel={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                  onPress={() => setShowPassword((current) => !current)}
+                  style={styles.eyeButton}
+                >
+                  <MaterialCommunityIcons
+                    color={colors.onSurfaceVariant}
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={21}
+                  />
+                </Pressable>
+              )}
+              secureTextEntry={!showPassword}
               value={password}
             />
             <Field
               label="Confirmar contrasena"
               onChangeText={setConfirmPassword}
               placeholder="Repite tu nueva clave"
-              secureTextEntry
+              rightAccessory={(
+                <Pressable
+                  accessibilityLabel={showConfirmPassword ? 'Ocultar confirmacion' : 'Mostrar confirmacion'}
+                  onPress={() => setShowConfirmPassword((current) => !current)}
+                  style={styles.eyeButton}
+                >
+                  <MaterialCommunityIcons
+                    color={colors.onSurfaceVariant}
+                    name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={21}
+                  />
+                </Pressable>
+              )}
+              secureTextEntry={!showConfirmPassword}
               value={confirmPassword}
             />
 
@@ -224,15 +252,18 @@ export default function ResetPasswordScreen({ onBack }) {
   );
 }
 
-function Field({ label, ...props }) {
+function Field({ label, rightAccessory, ...props }) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput
-        placeholderTextColor="rgba(201, 196, 211, 0.55)"
-        style={styles.input}
-        {...props}
-      />
+      <View style={[styles.inputWrap, rightAccessory && styles.inputWrapWithAccessory]}>
+        <TextInput
+          placeholderTextColor="rgba(201, 196, 211, 0.55)"
+          style={[styles.input, rightAccessory && styles.inputWithAccessory]}
+          {...props}
+        />
+        {rightAccessory}
+      </View>
     </View>
   );
 }
@@ -263,6 +294,12 @@ const styles = StyleSheet.create({
   field: {
     marginBottom: 16
   },
+  eyeButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44
+  },
   iconButton: {
     alignItems: 'center',
     height: 44,
@@ -270,14 +307,26 @@ const styles = StyleSheet.create({
     width: 44
   },
   input: {
+    color: colors.onSurface,
+    flex: 1,
+    fontSize: 15,
+    height: '100%',
+    paddingHorizontal: 16
+  },
+  inputWithAccessory: {
+    paddingRight: 4
+  },
+  inputWrap: {
     backgroundColor: colors.surfaceHigh,
     borderColor: 'rgba(72, 69, 81, 0.4)',
     borderRadius: radii.md,
     borderWidth: 1,
-    color: colors.onSurface,
-    fontSize: 15,
-    height: 54,
-    paddingHorizontal: 16
+    height: 54
+  },
+  inputWrapWithAccessory: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    paddingRight: 4
   },
   label: {
     color: colors.onSurfaceVariant,
