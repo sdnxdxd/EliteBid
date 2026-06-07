@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 
 const { first, query, run } = require('./db');
-const { sendVerificationEmail } = require('./emailService');
+const { sendPasswordResetEmail, sendVerificationEmail } = require('./emailService');
 const { initDatabase } = require('./initDatabase');
 const { hashPassword, verifyPassword } = require('./passwordHash');
 
@@ -482,28 +482,74 @@ app.post('/api/auth/logout', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/api/auth/reset-password', wrap(async (req, res) => {
-  const { identifier = '', password, confirmPassword } = req.body;
-  const cleanIdentifier = normalizeWhitespace(identifier);
-  const emailIdentifier = normalizeEmail(cleanIdentifier);
-  const documentIdentifier = onlyDigits(cleanIdentifier);
-
-  if (!emailIdentifier && !documentIdentifier) throw new Error('Ingresa tu correo o numero de documento.');
-  validatePassword(password, confirmPassword);
+app.post('/api/auth/request-password-reset', wrap(async (req, res) => {
+  const email = normalizeEmail(req.body.email ?? req.body.identifier);
+  if (!email) throw new Error('Ingresa un correo valido.');
 
   const user = await first(
-    `SELECT u.id
+    `SELECT u.id, u.email, u.nombre
      FROM usuarios u
-     JOIN personas p ON p.identificador = u.cliente_id
-     WHERE (lower(u.email) = ? OR p.documento = ?)
+     WHERE lower(u.email) = ?
        AND u.rol = 'cliente'
        AND u.estado = 'activo'
        AND u.email_verificado = 'si'
      LIMIT 1`,
-    [emailIdentifier, documentIdentifier]
+    [email]
   );
-  if (!user) throw new Error('No encontramos un usuario con esos datos.');
-  await run('UPDATE usuarios SET password = ? WHERE id = ?', [await hashPassword(password), user.id]);
+  if (!user) throw new Error('No encontramos un usuario activo con ese correo.');
+
+  const resetCode = createOneTimeCode();
+  await run(
+    'UPDATE usuarios SET password_reset_code_hash = ?, password_reset_expires_at = ? WHERE id = ?',
+    [await hashPassword(resetCode), toMysqlDateTime(new Date(Date.now() + 15 * 60 * 1000)), user.id]
+  );
+
+  const emailResult = await sendPasswordResetForUser({
+    email: user.email,
+    name: user.nombre,
+    token: resetCode
+  });
+
+  res.json({
+    ok: true,
+    email: maskEmail(user.email),
+    resetEmailSent: emailResult.sent
+  });
+}));
+
+app.post('/api/auth/reset-password', wrap(async (req, res) => {
+  const { identifier = '', email = '', code: rawCode = '', password, confirmPassword } = req.body;
+  const cleanIdentifier = normalizeWhitespace(email || identifier);
+  const emailIdentifier = normalizeEmail(cleanIdentifier);
+  const code = normalizeOneTimeCode(rawCode);
+
+  if (!emailIdentifier) throw new Error('Ingresa el correo asociado a tu cuenta.');
+  if (!code) throw new Error('Ingresa el codigo de recuperacion de 6 digitos.');
+  validatePassword(password, confirmPassword);
+
+  const user = await first(
+    `SELECT u.id, u.password_reset_code_hash AS resetCodeHash,
+      u.password_reset_expires_at AS resetExpiresAt,
+      u.password_reset_expires_at <= UTC_TIMESTAMP() AS resetExpired
+     FROM usuarios u
+     WHERE lower(u.email) = ?
+       AND u.rol = 'cliente'
+       AND u.estado = 'activo'
+       AND u.email_verificado = 'si'
+     LIMIT 1`,
+    [emailIdentifier]
+  );
+  if (!user) throw new Error('No encontramos un usuario activo con ese correo.');
+  if (!user.resetCodeHash) throw new Error('Solicita un codigo de recuperacion antes de cambiar la clave.');
+  if (Number(user.resetExpired)) throw new Error('El codigo de recuperacion vencio. Solicita uno nuevo.');
+
+  const codeResult = await verifyPassword(code, user.resetCodeHash);
+  if (!codeResult.ok) throw new Error('El codigo de recuperacion no es correcto.');
+
+  await run(
+    'UPDATE usuarios SET password = ?, password_reset_code_hash = NULL, password_reset_expires_at = NULL WHERE id = ?',
+    [await hashPassword(password), user.id]
+  );
   await run('DELETE FROM sesiones WHERE usuario_id = ?', [user.id]);
   res.json({ ok: true });
 }));
@@ -2240,6 +2286,26 @@ async function sendVerificationForUser({ email, name, token }) {
   const timeoutPromise = new Promise((resolve) => {
     timeoutId = setTimeout(() => {
       console.warn(`Envio de verificacion a ${email} demorado. La cuenta queda pendiente y puede reintentar.`);
+      resolve({ sent: false, skipped: false, reason: 'send_timeout' });
+    }, timeoutMs);
+  });
+
+  const result = await Promise.race([sendPromise, timeoutPromise]);
+  clearTimeout(timeoutId);
+  return result;
+}
+
+async function sendPasswordResetForUser({ email, name, token }) {
+  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 6000);
+  const sendPromise = sendPasswordResetEmail({ to: email, name, token }).catch((error) => {
+    console.warn(`No se pudo enviar recuperacion a ${email}: ${error.message}`);
+    return { sent: false, skipped: false, reason: 'send_failed' };
+  });
+
+  let timeoutId;
+  const timeoutPromise = new Promise((resolve) => {
+    timeoutId = setTimeout(() => {
+      console.warn(`Envio de recuperacion a ${email} demorado. Puede reintentar.`);
       resolve({ sent: false, skipped: false, reason: 'send_timeout' });
     }, timeoutMs);
   });

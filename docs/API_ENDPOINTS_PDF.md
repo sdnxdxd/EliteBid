@@ -13,6 +13,8 @@ Los endpoints del PDF se exponen con prefijo `/api`. Los endpoints `/admin/...` 
 | `POST /auth/registro/fase2` | Implementado como alias compatible de `/auth/register/paso2`. |
 | `POST /auth/login` | Implementado. Acepta email o documento, mas clave/OTP. |
 | `POST /auth/logout` | Implementado. |
+| `POST /auth/request-password-reset` | Extra implementado: solicita codigo de recuperacion por mail. |
+| `POST /auth/reset-password` | Extra implementado: confirma codigo de recuperacion y actualiza la clave. |
 
 ## Usuarios y Perfil
 

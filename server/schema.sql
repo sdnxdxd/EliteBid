@@ -188,6 +188,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
   verification_token VARCHAR(180),
   verification_code_hash VARCHAR(255),
   verification_code_expires_at DATETIME,
+  password_reset_code_hash VARCHAR(255),
+  password_reset_expires_at DATETIME,
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_usuarios_cliente FOREIGN KEY (cliente_id) REFERENCES clientes (identificador)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

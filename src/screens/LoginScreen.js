@@ -110,7 +110,7 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onR
               </View>
               <View style={styles.assistCopy}>
                 <Text style={styles.assistTitle}>Olvide mi contrasena</Text>
-                <Text style={styles.assistText}>Recupera tu acceso con email o DNI.</Text>
+                <Text style={styles.assistText}>Recibi un codigo por mail para cambiarla.</Text>
               </View>
               <MaterialCommunityIcons color={colors.onSurfaceVariant} name="chevron-right" size={20} />
             </Pressable>

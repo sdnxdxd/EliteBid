@@ -21,6 +21,7 @@ const PASSWORD = 'QaFlow!2203';
 const RESET_PASSWORD = 'QaFlow!3304';
 const QA_GUARANTEE_AMOUNT = 10000000;
 const OTP = '654321';
+const RESET_OTP = '987654';
 
 let server;
 
@@ -79,6 +80,14 @@ async function setOtp(db, email, code = OTP, minutes = 15) {
   const hash = await hashPassword(code);
   await db.query(
     'UPDATE usuarios SET verification_code_hash = ?, verification_code_expires_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE) WHERE email = ?',
+    [hash, minutes, email]
+  );
+}
+
+async function setPasswordResetCode(db, email, code = RESET_OTP, minutes = 15) {
+  const hash = await hashPassword(code);
+  await db.query(
+    'UPDATE usuarios SET password_reset_code_hash = ?, password_reset_expires_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE) WHERE email = ?',
     [hash, minutes, email]
   );
 }
@@ -453,19 +462,47 @@ async function runAuthRegistrationMatrix(db) {
       body: JSON.stringify({ email: normalizedGuest.email })
     }), 'no encontramos');
   await expectReject('auth 42 reset email inexistente rechazado', () =>
+    request('/auth/request-password-reset', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: `qa.robust.${RUN_ID}.faltante@example.com`
+      })
+    }), 'no encontramos');
+  await expectReject('auth 43 reset sin codigo solicitado rechazado', () =>
     request('/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({
-        identifier: `qa.robust.${RUN_ID}.faltante@example.com`,
+        email: normalizedGuest.email,
+        code: RESET_OTP,
         password: RESET_PASSWORD,
         confirmPassword: RESET_PASSWORD
       })
-    }), 'no encontramos');
-  await expectReject('auth 43 reset password confirmacion distinta rechazado', () =>
+    }), 'solicita');
+
+  const resetRequest = await request('/auth/request-password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email: normalizedGuest.email })
+  });
+  if (!resetRequest.ok) throw new Error('Solicitud de reset no devolvio ok');
+  await setPasswordResetCode(db, normalizedGuest.email);
+  logOk('auth 44 reset solicita codigo por mail');
+
+  await expectReject('auth 45 reset codigo incorrecto rechazado', () =>
     request('/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({
-        identifier: normalizedGuest.email,
+        email: normalizedGuest.email,
+        code: '111111',
+        password: RESET_PASSWORD,
+        confirmPassword: RESET_PASSWORD
+      })
+    }), 'codigo');
+  await expectReject('auth 46 reset password confirmacion distinta rechazado', () =>
+    request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: normalizedGuest.email,
+        code: RESET_OTP,
         password: RESET_PASSWORD,
         confirmPassword: 'Otra!3304'
       })
@@ -474,12 +511,13 @@ async function runAuthRegistrationMatrix(db) {
   await request('/auth/reset-password', {
     method: 'POST',
     body: JSON.stringify({
-      identifier: normalizedGuest.email,
+      email: normalizedGuest.email,
+      code: RESET_OTP,
       password: RESET_PASSWORD,
       confirmPassword: RESET_PASSWORD
     })
   });
-  await expectReject('auth 44 reset invalida clave anterior', () =>
+  await expectReject('auth 47 reset invalida clave anterior', () =>
     request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email: normalizedGuest.email, password: PASSWORD })
@@ -491,7 +529,7 @@ async function runAuthRegistrationMatrix(db) {
   if (resetLogin.rol !== 'cliente' || resetLogin.estado !== 'activo') {
     throw new Error('Login con clave reseteada no funciono');
   }
-  logOk('auth 45 reset permite login con clave nueva');
+  logOk('auth 48 reset permite login con clave nueva');
 
   const documentLogin = await request('/auth/login', {
     method: 'POST',
@@ -500,13 +538,13 @@ async function runAuthRegistrationMatrix(db) {
   if (documentLogin.rol !== 'cliente' || documentLogin.estado !== 'activo') {
     throw new Error('Login por documento no funciono');
   }
-  logOk('auth 46 login por documento compatible con pdf');
+  logOk('auth 49 login por documento compatible con pdf');
 
   const sessionState = await request('/auth/estado', { token: documentLogin.sessionToken });
   if (!sessionState || sessionState.rol !== 'cliente') {
     throw new Error('/auth/estado no devolvio sesion activa');
   }
-  logOk('auth 47 estado de sesion compatible con pdf');
+  logOk('auth 50 estado de sesion compatible con pdf');
 
   const phaseOne = await request('/auth/registro/fase1', {
     method: 'POST',
@@ -533,7 +571,7 @@ async function runAuthRegistrationMatrix(db) {
   if (phaseTwo.rol !== 'cliente' || phaseTwo.estado !== 'activo') {
     throw new Error('Registro fase2 PDF no activo cliente');
   }
-  logOk('auth 48 registro fase1/fase2 compatible con pdf');
+  logOk('auth 51 registro fase1/fase2 compatible con pdf');
 }
 
 async function cleanup(db, touched = {}) {
@@ -691,15 +729,22 @@ async function main() {
       request('/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify({
-          identifier: userB.email,
+          email: userB.email,
+          code: RESET_OTP,
           password: 'simple',
           confirmPassword: 'simple'
         })
       }), 'clave');
+    await request('/auth/request-password-reset', {
+      method: 'POST',
+      body: JSON.stringify({ email: userB.email })
+    });
+    await setPasswordResetCode(db, userB.email);
     await request('/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({
-        identifier: userB.email,
+        email: userB.email,
+        code: RESET_OTP,
         password: RESET_PASSWORD,
         confirmPassword: RESET_PASSWORD
       })

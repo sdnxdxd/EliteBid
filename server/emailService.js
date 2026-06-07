@@ -6,6 +6,7 @@ require('dotenv').config();
 const defaultCompanyEmail = 'verificacion@elitebid.com';
 const defaultFrom = `EliteBid <${defaultCompanyEmail}>`;
 const defaultSubject = 'Tu codigo de verificacion EliteBid';
+const defaultPasswordResetSubject = 'Tu codigo para recuperar la clave EliteBid';
 
 function buildVerificationUrl(token) {
   const baseUrl = String(process.env.APP_PUBLIC_URL || `http://127.0.0.1:${process.env.API_PORT || 3001}`).replace(/\/$/, '');
@@ -14,7 +15,25 @@ function buildVerificationUrl(token) {
 
 async function sendVerificationEmail({ to, name, token }) {
   const content = buildVerificationContent({ name, code: token });
+  return sendMail({
+    content,
+    fallbackLog: `MAIL_USER/MAIL_PASSWORD o RESEND_API_KEY no configurados. Verificacion pendiente para ${to}: ${token}`,
+    subject: process.env.MAIL_VERIFICATION_SUBJECT || defaultSubject,
+    to
+  });
+}
 
+async function sendPasswordResetEmail({ to, name, token }) {
+  const content = buildPasswordResetContent({ name, code: token });
+  return sendMail({
+    content,
+    fallbackLog: `MAIL_USER/MAIL_PASSWORD o RESEND_API_KEY no configurados. Recuperacion pendiente para ${to}: ${token}`,
+    subject: process.env.MAIL_PASSWORD_RESET_SUBJECT || defaultPasswordResetSubject,
+    to
+  });
+}
+
+async function sendMail({ to, subject, content, fallbackLog }) {
   if (hasSmtpConfig()) {
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -32,7 +51,7 @@ async function sendVerificationEmail({ to, name, token }) {
     const info = await transporter.sendMail({
       from: process.env.MAIL_FROM || `EliteBid <${process.env.MAIL_USER}>`,
       to,
-      subject: process.env.MAIL_VERIFICATION_SUBJECT || defaultSubject,
+      subject,
       html: content.html,
       text: content.text
     });
@@ -41,20 +60,20 @@ async function sendVerificationEmail({ to, name, token }) {
   }
 
   if (process.env.RESEND_API_KEY) {
-    return sendWithResend({ to, content });
+    return sendWithResend({ to, subject, content });
   }
 
-  console.warn(`MAIL_USER/MAIL_PASSWORD o RESEND_API_KEY no configurados. Verificacion pendiente para ${to}: ${token}`);
+  console.warn(fallbackLog);
   return { sent: false, skipped: true, reason: 'missing_email_provider' };
 }
 
-async function sendWithResend({ to, content }) {
+async function sendWithResend({ to, subject, content }) {
   const resend = new Resend(process.env.RESEND_API_KEY);
 
   const { data, error } = await resend.emails.send({
     from: process.env.RESEND_FROM || defaultFrom,
     to,
-    subject: process.env.MAIL_VERIFICATION_SUBJECT || defaultSubject,
+    subject,
     html: content.html,
     text: content.text
   });
@@ -93,6 +112,29 @@ function buildVerificationContent({ name, code }) {
   };
 }
 
+function buildPasswordResetContent({ name, code }) {
+  const firstName = escapeHtml(name || 'tu cuenta');
+  const safeCode = escapeHtml(code);
+
+  return {
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <h1 style="font-size: 22px;">Recuperacion de clave EliteBid</h1>
+        <p>Hola ${firstName}, recibimos una solicitud para cambiar tu contrasena.</p>
+        <p>Usa este codigo en EliteBid para confirmar el cambio y crear una nueva clave.</p>
+        <p style="font-size: 30px; font-weight: 800; letter-spacing: 6px; margin: 24px 0;">${safeCode}</p>
+        <p>El codigo vence en 15 minutos. Si no pediste este cambio, ignora este mensaje.</p>
+      </div>
+    `,
+    text: [
+      `Hola ${name || ''}, recibimos una solicitud para cambiar tu contrasena en EliteBid.`,
+      'Usa este codigo para confirmar el cambio y crear una nueva clave.',
+      `Codigo: ${code}`,
+      'El codigo vence en 15 minutos. Si no pediste este cambio, ignora este mensaje.'
+    ].join('\n\n')
+  };
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -104,5 +146,6 @@ function escapeHtml(value) {
 
 module.exports = {
   buildVerificationUrl,
+  sendPasswordResetEmail,
   sendVerificationEmail
 };

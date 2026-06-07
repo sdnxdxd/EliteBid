@@ -63,6 +63,16 @@ async function migrateSecuritySchema() {
     'ALTER TABLE usuarios ADD COLUMN verification_code_expires_at DATETIME'
   );
   await addColumnIfMissing(
+    'usuarios',
+    'password_reset_code_hash',
+    'ALTER TABLE usuarios ADD COLUMN password_reset_code_hash VARCHAR(255)'
+  );
+  await addColumnIfMissing(
+    'usuarios',
+    'password_reset_expires_at',
+    'ALTER TABLE usuarios ADD COLUMN password_reset_expires_at DATETIME'
+  );
+  await addColumnIfMissing(
     'items_catalogo',
     'timer_inicio',
     'ALTER TABLE items_catalogo ADD COLUMN timer_inicio DATETIME AFTER puja_actual'

@@ -53,3 +53,17 @@ export async function resetPassword(identifier, password, confirmPassword) {
     method: 'POST'
   });
 }
+
+export async function requestPasswordReset(email) {
+  return apiRequest('/auth/request-password-reset', {
+    body: JSON.stringify({ email }),
+    method: 'POST'
+  });
+}
+
+export async function confirmPasswordReset(email, code, password, confirmPassword) {
+  await apiRequest('/auth/reset-password', {
+    body: JSON.stringify({ email, code, password, confirmPassword }),
+    method: 'POST'
+  });
+}

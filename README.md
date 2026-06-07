@@ -63,6 +63,7 @@ MAIL_USER=sdnxdxd@gmail.com
 MAIL_PASSWORD=clave_o_app_password
 MAIL_FROM=EliteBid <sdnxdxd@gmail.com>
 MAIL_VERIFICATION_SUBJECT=Tu codigo de verificacion EliteBid
+MAIL_PASSWORD_RESET_SUBJECT=Tu codigo para recuperar la clave EliteBid
 ```
 
 La casilla `verificacion@elitebid.com` debe existir en el proveedor elegido. Si es Gmail/Google Workspace, usar una app password, no la clave normal de la cuenta. Como alternativa se puede usar Resend:
@@ -76,6 +77,13 @@ Si no hay SMTP ni `RESEND_API_KEY`, el registro no falla: el backend deja la cue
 
 ```bash
 curl -X POST http://127.0.0.1:3001/api/auth/resend-verification -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\"}"
+```
+
+Para recuperar clave, primero se solicita el codigo por mail y despues se confirma el cambio:
+
+```bash
+curl -X POST http://127.0.0.1:3001/api/auth/request-password-reset -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\"}"
+curl -X POST http://127.0.0.1:3001/api/auth/reset-password -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\",\"code\":\"123456\",\"password\":\"Nueva!2203\",\"confirmPassword\":\"Nueva!2203\"}"
 ```
 
 Mientras la cuenta este como invitada:

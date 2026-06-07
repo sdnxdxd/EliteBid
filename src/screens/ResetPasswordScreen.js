@@ -13,27 +13,60 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { resetPassword } from '../backend/authService';
+import { confirmPasswordReset, requestPasswordReset } from '../backend/authService';
 import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 import { getPasswordStatus, isPasswordReady, passwordRuleCopy } from '../utils/passwordRules';
 
 export default function ResetPasswordScreen({ onBack }) {
-  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [step, setStep] = useState('request');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [errorDialog, setErrorDialog] = useState('');
   const passwordStatus = useMemo(() => getPasswordStatus(password, confirmPassword), [password, confirmPassword]);
-  const canSubmit = Boolean(identifier.trim()) && isPasswordReady(passwordStatus);
+  const canRequest = Boolean(email.trim());
+  const canConfirm = Boolean(email.trim()) && code.trim().length === 6 && isPasswordReady(passwordStatus);
 
-  async function submit() {
+  async function requestCode() {
     setErrorDialog('');
     setMessage('');
 
-    if (!identifier.trim()) {
-      setErrorDialog('Ingresa tu correo o numero de documento para recuperar la clave.');
+    if (!email.trim()) {
+      setErrorDialog('Ingresa el correo de tu cuenta para recibir el codigo.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const result = await requestPasswordReset(email);
+      setStep('confirm');
+      setMessage(
+        result.resetEmailSent
+          ? 'Te enviamos un codigo de recuperacion. Revisalo e ingresalo aca.'
+          : 'Generamos el codigo, pero no pudimos enviar el mail. Revisa SMTP o intenta reenviar.'
+      );
+    } catch (resetError) {
+      setErrorDialog(resetError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function confirmReset() {
+    setErrorDialog('');
+    setMessage('');
+
+    if (!email.trim()) {
+      setErrorDialog('Ingresa el correo de tu cuenta.');
+      return;
+    }
+    if (code.trim().length !== 6) {
+      setErrorDialog('Ingresa el codigo de 6 digitos que recibiste por mail.');
       return;
     }
     if (!password.trim()) {
@@ -52,8 +85,9 @@ export default function ResetPasswordScreen({ onBack }) {
     setLoading(true);
 
     try {
-      await resetPassword(identifier, password, confirmPassword);
+      await confirmPasswordReset(email, code, password, confirmPassword);
       setMessage('Clave actualizada. Ya podes iniciar sesion con tu nueva clave.');
+      setCode('');
       setPassword('');
       setConfirmPassword('');
     } catch (resetError) {
@@ -92,57 +126,79 @@ export default function ResetPasswordScreen({ onBack }) {
         </View>
         <Text style={styles.title}>Crear nueva clave</Text>
         <Text style={styles.subtitle}>
-          Validamos tu identidad con tu correo o numero de documento registrado.
+          Primero te enviamos un codigo a tu correo. Despues lo ingresas aca para cambiar la clave.
         </Text>
 
         <Field
           autoCapitalize="none"
-          label="Correo o documento"
-          onChangeText={setIdentifier}
-          placeholder="email@dominio.com o DNI"
-          value={identifier}
-        />
-        <Field
-          label="Nueva contrasena"
-          onChangeText={setPassword}
-          placeholder="Ingresa tu nueva clave"
-          secureTextEntry
-          value={password}
-        />
-        <Field
-          label="Confirmar contrasena"
-          onChangeText={setConfirmPassword}
-          placeholder="Repite tu nueva clave"
-          secureTextEntry
-          value={confirmPassword}
+          autoComplete="email"
+          keyboardType="email-address"
+          label="Correo"
+          onChangeText={setEmail}
+          placeholder="email@dominio.com"
+          value={email}
         />
 
-        <View style={styles.rules}>
-          {passwordRuleCopy.map(([key, label]) => (
-            <View key={key} style={styles.ruleRow}>
-              <MaterialCommunityIcons
-                color={passwordStatus[key] ? '#73E6A2' : colors.onSurfaceVariant}
-                name={passwordStatus[key] ? 'check-circle' : 'circle-outline'}
-                size={18}
-              />
-              <Text style={[styles.rule, passwordStatus[key] && styles.ruleValid]}>{label}</Text>
+        {step === 'confirm' ? (
+          <>
+            <Field
+              keyboardType="numeric"
+              label="Codigo recibido"
+              maxLength={6}
+              onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6 digitos"
+              value={code}
+            />
+            <Field
+              label="Nueva contrasena"
+              onChangeText={setPassword}
+              placeholder="Ingresa tu nueva clave"
+              secureTextEntry
+              value={password}
+            />
+            <Field
+              label="Confirmar contrasena"
+              onChangeText={setConfirmPassword}
+              placeholder="Repite tu nueva clave"
+              secureTextEntry
+              value={confirmPassword}
+            />
+
+            <View style={styles.rules}>
+              {passwordRuleCopy.map(([key, label]) => (
+                <View key={key} style={styles.ruleRow}>
+                  <MaterialCommunityIcons
+                    color={passwordStatus[key] ? '#73E6A2' : colors.onSurfaceVariant}
+                    name={passwordStatus[key] ? 'check-circle' : 'circle-outline'}
+                    size={18}
+                  />
+                  <Text style={[styles.rule, passwordStatus[key] && styles.ruleValid]}>{label}</Text>
+                </View>
+              ))}
+              {confirmPassword ? (
+                <View style={styles.ruleRow}>
+                  <MaterialCommunityIcons
+                    color={passwordStatus.matches ? '#73E6A2' : colors.onSurfaceVariant}
+                    name={passwordStatus.matches ? 'check-circle' : 'circle-outline'}
+                    size={18}
+                  />
+                  <Text style={[styles.rule, passwordStatus.matches && styles.ruleValid]}>Las contrasenas coinciden</Text>
+                </View>
+              ) : null}
             </View>
-          ))}
-          {confirmPassword ? (
-            <View style={styles.ruleRow}>
-              <MaterialCommunityIcons
-                color={passwordStatus.matches ? '#73E6A2' : colors.onSurfaceVariant}
-                name={passwordStatus.matches ? 'check-circle' : 'circle-outline'}
-                size={18}
-              />
-              <Text style={[styles.rule, passwordStatus.matches && styles.ruleValid]}>Las contrasenas coinciden</Text>
-            </View>
-          ) : null}
-        </View>
+          </>
+        ) : null}
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
 
-        <Pressable disabled={loading} onPress={submit} style={[styles.primaryButton, !canSubmit && styles.primaryButtonDisabled]}>
+        <Pressable
+          disabled={loading || (step === 'request' ? !canRequest : !canConfirm)}
+          onPress={step === 'request' ? requestCode : confirmReset}
+          style={[
+            styles.primaryButton,
+            (step === 'request' ? !canRequest : !canConfirm) && styles.primaryButtonDisabled
+          ]}
+        >
           <LinearGradient
             colors={[colors.primary, colors.primaryContainer]}
             end={{ x: 1, y: 1 }}
@@ -152,10 +208,17 @@ export default function ResetPasswordScreen({ onBack }) {
             {loading ? (
               <ActivityIndicator color={colors.onPrimaryFixed} />
             ) : (
-              <Text style={styles.primaryButtonText}>Actualizar clave</Text>
+              <Text style={styles.primaryButtonText}>{step === 'request' ? 'Enviar codigo' : 'Actualizar clave'}</Text>
             )}
           </LinearGradient>
         </Pressable>
+
+        {step === 'confirm' ? (
+          <Pressable disabled={loading} onPress={requestCode} style={styles.secondaryButton}>
+            <MaterialCommunityIcons color={colors.primary} name="email-sync-outline" size={18} />
+            <Text style={styles.secondaryButtonText}>Reenviar codigo</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -270,6 +333,23 @@ const styles = StyleSheet.create({
   rules: {
     marginBottom: 18,
     marginTop: -4
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    borderColor: 'rgba(147, 143, 156, 0.35)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    height: 50,
+    justifyContent: 'center',
+    marginTop: 12
+  },
+  secondaryButtonText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   subtitle: {
     color: colors.onSurfaceVariant,
