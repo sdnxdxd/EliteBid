@@ -97,6 +97,7 @@ Mientras la cuenta este como invitada:
 ## Entregables
 
 - Guia para correr y explicar la entrega: [`GUIA_SEGUNDA_ENTREGA.md`](./GUIA_SEGUNDA_ENTREGA.md)
+- Resumen para defensa oral: [`DEFENSA_SEGUNDA_ENTREGA_RESUMEN.md`](./DEFENSA_SEGUNDA_ENTREGA_RESUMEN.md)
 - Informe segunda entrega: [`INFORME_SEGUNDA_ENTREGA.md`](./INFORME_SEGUNDA_ENTREGA.md)
 - Checklist QA con capturas: [`QA_CHECKLIST_SEGUNDA_ENTREGA.md`](./QA_CHECKLIST_SEGUNDA_ENTREGA.md)
 - Rama de GitHub usada para compartir: `informe-segunda-entrega`
