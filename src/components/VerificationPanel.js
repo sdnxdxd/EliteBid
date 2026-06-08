@@ -19,6 +19,8 @@ export default function VerificationPanel({
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [errorDialog, setErrorDialog] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const passwordStatus = useMemo(() => getPasswordStatus(form.password, form.confirmPassword), [form.password, form.confirmPassword]);
   const canSubmit = form.code.length === 6 && isPasswordReady(passwordStatus);
 
@@ -123,7 +125,20 @@ export default function VerificationPanel({
       <Field
         label="Nueva contrasena"
         onChangeText={(value) => updateField('password', value)}
-        secureTextEntry
+        rightAccessory={(
+          <Pressable
+            accessibilityLabel={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+            onPress={() => setShowPassword((current) => !current)}
+            style={styles.eyeButton}
+          >
+            <MaterialCommunityIcons
+              color={colors.onSurfaceVariant}
+              name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={21}
+            />
+          </Pressable>
+        )}
+        secureTextEntry={!showPassword}
         value={form.password}
       />
       <View style={styles.passwordRules}>
@@ -134,7 +149,20 @@ export default function VerificationPanel({
       <Field
         label="Confirmar contrasena"
         onChangeText={(value) => updateField('confirmPassword', value)}
-        secureTextEntry
+        rightAccessory={(
+          <Pressable
+            accessibilityLabel={showConfirmPassword ? 'Ocultar confirmacion' : 'Mostrar confirmacion'}
+            onPress={() => setShowConfirmPassword((current) => !current)}
+            style={styles.eyeButton}
+          >
+            <MaterialCommunityIcons
+              color={colors.onSurfaceVariant}
+              name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={21}
+            />
+          </Pressable>
+        )}
+        secureTextEntry={!showConfirmPassword}
         value={form.confirmPassword}
       />
       {form.confirmPassword ? <PasswordRule checked={passwordStatus.matches} label="Las contrasenas coinciden" /> : null}
@@ -157,11 +185,18 @@ export default function VerificationPanel({
   );
 }
 
-function Field({ label, ...props }) {
+function Field({ label, rightAccessory, ...props }) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput placeholderTextColor="rgba(201, 196, 211, 0.55)" style={styles.input} {...props} />
+      <View style={[styles.inputWrap, rightAccessory && styles.inputWrapWithAccessory]}>
+        <TextInput
+          placeholderTextColor="rgba(201, 196, 211, 0.55)"
+          style={[styles.input, rightAccessory && styles.inputWithAccessory]}
+          {...props}
+        />
+        {rightAccessory}
+      </View>
     </View>
   );
 }
@@ -201,6 +236,12 @@ const styles = StyleSheet.create({
   field: {
     marginBottom: 14
   },
+  eyeButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44
+  },
   header: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -216,14 +257,26 @@ const styles = StyleSheet.create({
     width: 44
   },
   input: {
+    color: colors.onSurface,
+    flex: 1,
+    fontSize: 14,
+    height: '100%',
+    paddingHorizontal: 14
+  },
+  inputWithAccessory: {
+    paddingRight: 4
+  },
+  inputWrap: {
     backgroundColor: colors.surfaceHigh,
     borderColor: 'rgba(72, 69, 81, 0.36)',
     borderRadius: radii.md,
     borderWidth: 1,
-    color: colors.onSurface,
-    fontSize: 14,
-    minHeight: 50,
-    paddingHorizontal: 14
+    minHeight: 50
+  },
+  inputWrapWithAccessory: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    paddingRight: 4
   },
   label: {
     color: colors.onSurfaceVariant,

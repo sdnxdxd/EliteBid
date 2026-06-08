@@ -20,6 +20,7 @@ import { colors, radii, shadows } from '../theme';
 export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onResendVerification }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorDialog, setErrorDialog] = useState('');
 
@@ -93,14 +94,27 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onR
 
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Clave o codigo</Text>
-            <TextInput
-              onChangeText={setPassword}
-              placeholder="Clave o codigo de 6 digitos"
-              placeholderTextColor="rgba(201, 196, 211, 0.55)"
-              secureTextEntry
-              style={styles.input}
-              value={password}
-            />
+            <View style={styles.inputWrapWithAccessory}>
+              <TextInput
+                onChangeText={setPassword}
+                placeholder="Clave o codigo de 6 digitos"
+                placeholderTextColor="rgba(201, 196, 211, 0.55)"
+                secureTextEntry={!showPassword}
+                style={[styles.input, styles.inputWithAccessory]}
+                value={password}
+              />
+              <Pressable
+                accessibilityLabel={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+                onPress={() => setShowPassword((current) => !current)}
+                style={styles.eyeButton}
+              >
+                <MaterialCommunityIcons
+                  color={colors.onSurfaceVariant}
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={21}
+                />
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.assistPanel}>
@@ -200,6 +214,12 @@ const styles = StyleSheet.create({
   fieldGroup: {
     marginBottom: 16
   },
+  eyeButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44
+  },
   assistAction: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -255,6 +275,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     height: 54,
     paddingHorizontal: 16
+  },
+  inputWithAccessory: {
+    borderWidth: 0,
+    flex: 1,
+    height: '100%',
+    paddingRight: 4
+  },
+  inputWrapWithAccessory: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceHigh,
+    borderColor: 'rgba(72, 69, 81, 0.4)',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    height: 54,
+    paddingRight: 4
   },
   label: {
     color: colors.onSurfaceVariant,
