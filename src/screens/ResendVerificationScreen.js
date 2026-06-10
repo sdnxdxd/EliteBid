@@ -38,7 +38,7 @@ export default function ResendVerificationScreen({ onBack }) {
       const result = await resendVerificationEmail(identifier);
       setMessage(
         result.verificationEmailSent
-          ? `Enviamos un nuevo codigo de verificacion a ${result.email}.`
+          ? `Enviamos un nuevo codigo de verificacion de email a ${result.email}.`
           : 'La cuenta fue validada, pero no pudimos enviar el mail. Revisa SMTP e intenta nuevamente.'
       );
     } catch (resendError) {
@@ -67,7 +67,7 @@ export default function ResendVerificationScreen({ onBack }) {
         <Pressable onPress={onBack} style={styles.iconButton}>
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
-        <Text style={styles.logo}>Codigo invitado</Text>
+        <Text style={styles.logo}>Codigo de email</Text>
         <View style={styles.iconButton} />
       </View>
 
@@ -77,7 +77,7 @@ export default function ResendVerificationScreen({ onBack }) {
         </View>
         <Text style={styles.title}>Verificar identidad</Text>
         <Text style={styles.subtitle}>
-          Ingresa el email o DNI registrado. Si corresponde a una cuenta invitada pendiente, emitimos un nuevo codigo.
+          Ingresa el email o DNI registrado. Si corresponde a un email pendiente, emitimos un nuevo codigo.
         </Text>
 
         <View style={styles.field}>

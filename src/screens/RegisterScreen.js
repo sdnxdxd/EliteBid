@@ -188,7 +188,7 @@ function PersonalStep({ form, pickDocument, updateField }) {
       <View style={styles.verifiedBox}>
         <MaterialCommunityIcons color={colors.primaryContainer} name="email-fast-outline" size={26} />
         <Text style={styles.verifiedText}>
-          Te vamos a enviar un codigo de un solo uso por email. Mientras tanto vas a entrar como invitado.
+          Primero recibis el mail de aceptacion de la empresa y despues un codigo para verificar tu email. Mientras tanto vas a entrar como invitado.
         </Text>
       </View>
 

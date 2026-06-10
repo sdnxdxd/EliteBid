@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: elitebid-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+      - key: DB_AUTO_INIT
+        value: "true"
+      - key: DB_CREATE_DATABASE
+        value: "false"
+      - key: DB_SSL
+        value: "false"
+      - key: DB_SSL_REJECT_UNAUTHORIZED
+        value: "true"
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: APP_PUBLIC_URL
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "true"
+      - key: SMTP_TIMEOUT_MS
+        value: "15000"
+      - key: MAIL_USER
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_VERIFICATION_SUBJECT
+        value: Tu codigo de verificacion EliteBid
+      - key: MAIL_ACCOUNT_STATUS_SUBJECT
+        value: Validacion de cuenta EliteBid
+      - key: MAIL_PASSWORD_RESET_SUBJECT
+        value: Tu codigo para recuperar la clave EliteBid

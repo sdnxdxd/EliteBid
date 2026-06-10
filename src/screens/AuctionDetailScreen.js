@@ -81,6 +81,11 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
   }
 
   async function toggleFavorite() {
+    if (user?.guestMode) {
+      setToast('Registrate para guardar favoritos y participar.');
+      return;
+    }
+
     setSavingFavorite(true);
     setError('');
 
@@ -116,6 +121,7 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
 
   const live = auction.status === 'abierta';
   const guest = user.rol === 'invitado';
+  const publicGuest = user?.guestMode || !user?.clienteId;
   const canJoin =
     !guest && live && auction.eligibility.categoryOk && auction.eligibility.verifiedPayments > 0 && !joining;
 
@@ -131,9 +137,13 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
           <MaterialCommunityIcons color={colors.primary} name="arrow-left" size={25} />
         </Pressable>
         <Text style={styles.logo}>Detalle</Text>
-        <Pressable onPress={onOpenNotifications} style={styles.iconButton}>
-          <MaterialCommunityIcons color={colors.primary} name="bell-outline" size={24} />
-        </Pressable>
+        {publicGuest ? (
+          <View style={styles.iconButton} />
+        ) : (
+          <Pressable onPress={onOpenNotifications} style={styles.iconButton}>
+            <MaterialCommunityIcons color={colors.primary} name="bell-outline" size={24} />
+          </Pressable>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -158,20 +168,41 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
         <View style={styles.detailCard}>
           <View style={styles.detailHeader}>
             <Text style={styles.category}>{categoryLabel[auction.category] ?? auction.category}</Text>
-            <Pressable
-              disabled={savingFavorite}
-              onPress={toggleFavorite}
-              style={[styles.favoriteButton, auction.isFavorite && styles.favoriteButtonActive]}
-            >
-              <MaterialCommunityIcons
-                color={auction.isFavorite ? colors.secondary : colors.onSurfaceVariant}
-                name={auction.isFavorite ? 'heart' : 'heart-outline'}
-                size={23}
-              />
-            </Pressable>
+            {publicGuest ? null : (
+              <Pressable
+                disabled={savingFavorite}
+                onPress={toggleFavorite}
+                style={[styles.favoriteButton, auction.isFavorite && styles.favoriteButtonActive]}
+              >
+                <MaterialCommunityIcons
+                  color={auction.isFavorite ? colors.secondary : colors.onSurfaceVariant}
+                  name={auction.isFavorite ? 'heart' : 'heart-outline'}
+                  size={23}
+                />
+              </Pressable>
+            )}
           </View>
           <Text style={styles.title}>{auction.title}</Text>
           <Text style={styles.description}>{auction.fullDescription}</Text>
+
+          <View style={styles.catalogCard}>
+            <View style={styles.catalogHeader}>
+              <MaterialCommunityIcons color={colors.primary} name="format-list-bulleted" size={19} />
+              <Text style={styles.catalogTitle}>Catalogo de productos</Text>
+            </View>
+            {(auction.catalog || []).map((item, index) => (
+              <View key={item.itemId || item.productId || index} style={styles.catalogItem}>
+                <Image source={{ uri: item.imageUrl || auction.imageUrl }} style={styles.catalogImage} />
+                <View style={styles.catalogCopy}>
+                  <Text style={styles.catalogItemTitle}>Pieza {index + 1}</Text>
+                  <Text numberOfLines={2} style={styles.catalogDescription}>{item.description}</Text>
+                  <Text style={styles.catalogPrice}>
+                    {item.basePrice == null ? 'Precio reservado para usuarios registrados' : `Base ${formatMoney(item.basePrice)}`}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
 
           <View style={styles.infoGrid}>
             <InfoBlock label="Base" value={formatMoney(auction.basePrice)} />
@@ -184,25 +215,27 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
             {guest ? (
               <RuleRow
                 ok={false}
-                text="Cuenta invitada: verifica tu email para ver precios, editar datos y participar."
+                text={publicGuest
+                  ? 'Invitado: podes ver catalogos publicos de subastas futuras. Registrate para ver precios y participar.'
+                  : 'Cuenta invitada: verifica tu email para ver precios, editar datos y participar.'}
               />
             ) : null}
-            <RuleRow
+            {!publicGuest ? <RuleRow
               ok={auction.eligibility.categoryOk}
               text={
                 auction.eligibility.categoryOk
                   ? `Categoria habilitada: ${categoryLabel[user.categoria] ?? user.categoria}`
                   : 'Tu categoria no permite entrar a esta sala'
               }
-            />
-            <RuleRow
+            /> : null}
+            {!publicGuest ? <RuleRow
               ok={auction.eligibility.verifiedPayments > 0}
               text={
                 auction.eligibility.verifiedPayments > 0
                   ? `${auction.eligibility.verifiedPayments} medio de pago verificado`
                   : 'Necesitas un medio de pago verificado'
               }
-            />
+            /> : null}
             {!guest ? <RuleRow
               ok={live}
               text={live ? `Puja sugerida desde ${formatMoney(suggestedBid)}` : 'La sala abre en la fecha indicada'}
@@ -284,6 +317,61 @@ const styles = StyleSheet.create({
   category: {
     color: colors.tertiary,
     fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  catalogCard: {
+    backgroundColor: 'rgba(34, 20, 57, 0.72)',
+    borderColor: 'rgba(72, 69, 81, 0.24)',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    gap: 10,
+    marginTop: 16,
+    padding: 13
+  },
+  catalogCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  catalogDescription: {
+    color: colors.onSurfaceVariant,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 3
+  },
+  catalogHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 2
+  },
+  catalogImage: {
+    backgroundColor: colors.surfaceHighest,
+    borderRadius: radii.sm,
+    height: 54,
+    width: 54
+  },
+  catalogItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 64
+  },
+  catalogItemTitle: {
+    color: colors.onSurface,
+    fontSize: 13,
+    fontWeight: '900'
+  },
+  catalogPrice: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+    marginTop: 5
+  },
+  catalogTitle: {
+    color: colors.onSurface,
+    fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase'
   },

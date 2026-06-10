@@ -1,15 +1,19 @@
 import { apiRequest } from './apiClient';
 
+function clientQuery(clienteId) {
+  return clienteId ? `?clienteId=${clienteId}` : '';
+}
+
 export async function getHomeAuctions(clienteId) {
-  return apiRequest(`/auctions/home?clienteId=${clienteId}`);
+  return apiRequest(`/auctions/home${clientQuery(clienteId)}`);
 }
 
 export async function getAuctionList(clienteId) {
-  return apiRequest(`/auctions?clienteId=${clienteId}`);
+  return apiRequest(`/auctions${clientQuery(clienteId)}`);
 }
 
 export async function getAuctionDetail(auctionId, clienteId) {
-  return apiRequest(`/auctions/${auctionId}?clienteId=${clienteId}`);
+  return apiRequest(`/auctions/${auctionId}${clientQuery(clienteId)}`);
 }
 
 export async function getUserSummary(clienteId) {

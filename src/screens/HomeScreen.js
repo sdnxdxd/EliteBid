@@ -31,16 +31,19 @@ const categoryLabel = {
 
 export default function HomeScreen({
   user,
+  onCreateAccount,
   onNavigate,
   onOpenAuctionDetail,
   onOpenAuctions,
-  onOpenNotifications
+  onOpenNotifications,
+  onSignOut
 }) {
   const [liveAuctions, setLiveAuctions] = useState([]);
   const [upcomingAuctions, setUpcomingAuctions] = useState([]);
   const [favoriteIds, setFavoriteIds] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
+  const publicGuest = user?.guestMode || !user?.clienteId;
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -52,7 +55,7 @@ export default function HomeScreen({
   async function load() {
     const [auctions, favorites] = await Promise.all([
       getHomeAuctions(user.clienteId),
-      getFavoriteAuctionIds(user.clienteId)
+      publicGuest ? Promise.resolve([]) : getFavoriteAuctionIds(user.clienteId)
     ]);
 
     setLiveAuctions(auctions.live);
@@ -62,7 +65,7 @@ export default function HomeScreen({
 
   useEffect(() => {
     load();
-  }, [user.clienteId]);
+  }, [publicGuest, user.clienteId]);
 
   async function refresh() {
     setRefreshing(true);
@@ -71,6 +74,11 @@ export default function HomeScreen({
   }
 
   async function toggleFavorite(auctionId) {
+    if (publicGuest) {
+      setToast('Registrate para guardar favoritos y participar.');
+      return;
+    }
+
     const wasFavorite = favoriteIds.includes(auctionId);
     const nextIds = await toggleFavoriteAuction(user.clienteId, auctionId);
 
@@ -111,7 +119,7 @@ export default function HomeScreen({
           </View>
           <View style={styles.badge}>
             <MaterialCommunityIcons color={colors.tertiary} name="seal-variant" size={16} />
-            <Text style={styles.badgeText}>{categoryLabel[user.categoria] ?? user.categoria}</Text>
+            <Text style={styles.badgeText}>{publicGuest ? 'Invitado' : categoryLabel[user.categoria] ?? user.categoria}</Text>
           </View>
         </View>
 
@@ -124,24 +132,45 @@ export default function HomeScreen({
           />
         </View>
 
-        <SectionHeader action="Ver todas" onAction={onOpenAuctions} title="Subastas abiertas" />
-        <ScrollView
-          contentContainerStyle={styles.horizontalContent}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-        >
-          {liveAuctions.map((auction) => (
-            <AuctionCard
-              auction={auction}
-              isFavorite={favoriteSet.has(auction.id)}
-              key={auction.id}
-              onPress={() => onOpenAuctionDetail?.(auction.id, 'home')}
-              onToggleFavorite={() => toggleFavorite(auction.id)}
-            />
-          ))}
-        </ScrollView>
+        {publicGuest ? (
+          <View style={styles.guestActions}>
+            <Pressable onPress={onCreateAccount} style={styles.guestPrimaryButton}>
+              <MaterialCommunityIcons color={colors.onPrimaryFixed} name="account-plus-outline" size={18} />
+              <Text style={styles.guestPrimaryText}>Crear cuenta</Text>
+            </Pressable>
+            <Pressable onPress={onSignOut} style={styles.guestSecondaryButton}>
+              <MaterialCommunityIcons color={colors.primary} name="logout" size={18} />
+              <Text style={styles.guestSecondaryText}>Salir</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
-        <SectionHeader title="Proximas subastas" />
+        {!publicGuest ? (
+          <>
+            <SectionHeader action="Ver todas" onAction={onOpenAuctions} title="Subastas abiertas" />
+            <ScrollView
+              contentContainerStyle={styles.horizontalContent}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              {liveAuctions.map((auction) => (
+                <AuctionCard
+                  auction={auction}
+                  isFavorite={favoriteSet.has(auction.id)}
+                  key={auction.id}
+                  onPress={() => onOpenAuctionDetail?.(auction.id, 'home')}
+                  onToggleFavorite={() => toggleFavorite(auction.id)}
+                />
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
+
+        <SectionHeader
+          action={publicGuest ? 'Ver todas' : undefined}
+          onAction={publicGuest ? onOpenAuctions : undefined}
+          title={publicGuest ? 'Catalogos publicos futuros' : 'Proximas subastas'}
+        />
         <View style={styles.list}>
           {upcomingAuctions.map((auction) => (
             <AuctionListItem
@@ -149,7 +178,7 @@ export default function HomeScreen({
               isFavorite={favoriteSet.has(auction.id)}
               key={auction.id}
               onPress={() => onOpenAuctionDetail?.(auction.id, 'home')}
-              onToggleFavorite={() => toggleFavorite(auction.id)}
+              onToggleFavorite={publicGuest ? undefined : () => toggleFavorite(auction.id)}
             />
           ))}
         </View>
@@ -197,19 +226,21 @@ function AuctionCard({ auction, isFavorite, onPress, onToggleFavorite }) {
         <View style={styles.categoryChip}>
           <Text style={styles.categoryChipText}>{categoryLabel[auction.category] ?? auction.category}</Text>
         </View>
-        <Pressable
-          onPress={(event) => {
-            event?.stopPropagation?.();
-            onToggleFavorite?.();
-          }}
-          style={styles.favoriteButton}
-        >
-          <MaterialCommunityIcons
-            color={isFavorite ? colors.secondary : colors.onSurface}
-            name={isFavorite ? 'heart' : 'heart-outline'}
-            size={20}
-          />
-        </Pressable>
+        {onToggleFavorite ? (
+          <Pressable
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              onToggleFavorite?.();
+            }}
+            style={styles.favoriteButton}
+          >
+            <MaterialCommunityIcons
+              color={isFavorite ? colors.secondary : colors.onSurface}
+              name={isFavorite ? 'heart' : 'heart-outline'}
+              size={20}
+            />
+          </Pressable>
+        ) : null}
       </View>
       <View style={styles.cardBody}>
         <Text style={styles.cardMeta}>{auction.location}</Text>
@@ -241,19 +272,21 @@ function AuctionListItem({ auction, isFavorite, onPress, onToggleFavorite }) {
       <View style={styles.datePill}>
         <Text style={styles.dateText}>{formatShortDate(auction.date)}</Text>
       </View>
-      <Pressable
-        onPress={(event) => {
-          event?.stopPropagation?.();
-          onToggleFavorite?.();
-        }}
-        style={styles.listFavoriteButton}
-      >
-        <MaterialCommunityIcons
-          color={isFavorite ? colors.secondary : colors.onSurfaceVariant}
-          name={isFavorite ? 'heart' : 'heart-outline'}
-          size={20}
-        />
-      </Pressable>
+      {onToggleFavorite ? (
+        <Pressable
+          onPress={(event) => {
+            event?.stopPropagation?.();
+            onToggleFavorite?.();
+          }}
+          style={styles.listFavoriteButton}
+        >
+          <MaterialCommunityIcons
+            color={isFavorite ? colors.secondary : colors.onSurfaceVariant}
+            name={isFavorite ? 'heart' : 'heart-outline'}
+            size={20}
+          />
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -412,6 +445,44 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 24,
     marginTop: 30
+  },
+  guestActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14
+  },
+  guestPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.full,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    height: 44,
+    justifyContent: 'center'
+  },
+  guestPrimaryText: {
+    color: colors.onPrimaryFixed,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  guestSecondaryButton: {
+    alignItems: 'center',
+    borderColor: 'rgba(147, 143, 156, 0.34)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    height: 44,
+    justifyContent: 'center'
+  },
+  guestSecondaryText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   header: {
     alignItems: 'center',

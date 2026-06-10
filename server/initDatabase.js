@@ -5,12 +5,14 @@ const { connectWithoutDatabase, database, getPool, query, run } = require('./db'
 const { hashPassword } = require('./passwordHash');
 
 async function initDatabase() {
-  const connection = await connectWithoutDatabase();
+  if (process.env.DB_CREATE_DATABASE !== 'false') {
+    const connection = await connectWithoutDatabase();
 
-  try {
-    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-  } finally {
-    await connection.end();
+    try {
+      await connection.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    } finally {
+      await connection.end();
+    }
   }
 
   const schema = await fs.readFile(path.join(__dirname, 'schema.sql'), 'utf8');
@@ -308,7 +310,19 @@ async function seedDatabase() {
     image: 'https://images.unsplash.com/photo-1618220179428-22790b461013?auto=format&fit=crop&w=900&q=80',
     product: 'Piezas de diseno argentino contemporaneo para nuevos postores.',
     basePrice: 220000,
-    currentBid: 0
+    currentBid: 0,
+    extraItems: [
+      {
+        product: 'Silla BKF original restaurada con cuero natural.',
+        image: 'https://images.unsplash.com/photo-1506439773649-6e0eb8cfb237?auto=format&fit=crop&w=900&q=80',
+        basePrice: 180000
+      },
+      {
+        product: 'Lampara de mesa industrial de autor argentino.',
+        image: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=900&q=80',
+        basePrice: 95000
+      }
+    ]
   });
 
   await run(
@@ -385,6 +399,29 @@ async function seedAuction(auction) {
      WHERE identificador = ?`,
     [auction.basePrice, auction.basePrice * 0.12, auction.currentBid, auction.id]
   );
+
+  for (const [index, item] of (auction.extraItems || []).entries()) {
+    const productId = auction.id * 100 + index + 1;
+    const itemId = auction.id * 100 + index + 1;
+    await run(
+      `INSERT IGNORE INTO productos (identificador, fecha, disponible, descripcion_catalogo, descripcion_completa, revisor, duenio, seguro, imagen_uri)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [productId, auction.date, 'si', item.product, item.product, 2, 3, null, item.image || auction.image]
+    );
+    await run(
+      `INSERT IGNORE INTO items_catalogo (identificador, catalogo, producto, precio_base, comision, subastado, puja_actual)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [itemId, auction.id, productId, item.basePrice, item.basePrice * 0.12, 'no', item.currentBid || 0]
+    );
+    await run(
+      `UPDATE items_catalogo
+       SET precio_base = ?, comision = ?, subastado = 'no', puja_actual = ?,
+         timer_inicio = NULL, timer_vencimiento = NULL,
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ?`,
+      [item.basePrice, item.basePrice * 0.12, item.currentBid || 0, itemId]
+    );
+  }
 }
 
 if (require.main === module) {

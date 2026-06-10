@@ -17,13 +17,13 @@ export default function VerifyAccountScreen({ onContinueAsGuest, onVerified, use
           <View style={styles.heroIcon}>
             <MaterialCommunityIcons color={colors.onPrimaryFixed} name="email-lock-outline" size={34} />
           </View>
-          <Text style={styles.eyebrow}>Verificacion de cuenta</Text>
+          <Text style={styles.eyebrow}>Verificacion de email</Text>
           <Text style={styles.title}>
             {emailSent ? 'Te enviamos un codigo' : 'Codigo pendiente'}
           </Text>
           <Text style={styles.copy}>
             {emailSent
-              ? 'Ingresalo para crear tu contrasena y activar todas las funciones. Mientras tanto podes continuar como invitado.'
+              ? 'Tu cuenta ya fue aceptada por la empresa. Ingresalo para verificar el email, crear tu contrasena y activar todas las funciones.'
               : 'No pudimos enviar el mail todavia. Revisa la configuracion SMTP o toca reenviar codigo.'}
           </Text>
           <View style={styles.mailPill}>

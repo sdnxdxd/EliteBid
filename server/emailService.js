@@ -7,6 +7,7 @@ const defaultCompanyEmail = 'verificacion@elitebid.com';
 const defaultFrom = `EliteBid <${defaultCompanyEmail}>`;
 const defaultSubject = 'Tu codigo de verificacion EliteBid';
 const defaultPasswordResetSubject = 'Tu codigo para recuperar la clave EliteBid';
+const defaultAccountStatusSubject = 'Validacion de cuenta EliteBid';
 
 function buildVerificationUrl(token) {
   const baseUrl = String(process.env.APP_PUBLIC_URL || `http://127.0.0.1:${process.env.API_PORT || 3001}`).replace(/\/$/, '');
@@ -19,6 +20,16 @@ async function sendVerificationEmail({ to, name, token }) {
     content,
     fallbackLog: `MAIL_USER/MAIL_PASSWORD o RESEND_API_KEY no configurados. Verificacion pendiente para ${to}: ${token}`,
     subject: process.env.MAIL_VERIFICATION_SUBJECT || defaultSubject,
+    to
+  });
+}
+
+async function sendAccountReviewEmail({ accepted = true, to, name }) {
+  const content = buildAccountReviewContent({ accepted, name });
+  return sendMail({
+    content,
+    fallbackLog: `MAIL_USER/MAIL_PASSWORD o RESEND_API_KEY no configurados. Validacion de cuenta pendiente para ${to}`,
+    subject: process.env.MAIL_ACCOUNT_STATUS_SUBJECT || defaultAccountStatusSubject,
     to
   });
 }
@@ -97,17 +108,40 @@ function buildVerificationContent({ name, code }) {
     html: `
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
         <h1 style="font-size: 22px;">Codigo de verificacion EliteBid</h1>
-        <p>Hola ${firstName}, ya creamos tu cuenta como invitado.</p>
-        <p>Usa este codigo de un solo uso en EliteBid para crear tu contrasena definitiva y verificar la cuenta.</p>
+        <p>Hola ${firstName}, este codigo confirma que el email te pertenece.</p>
+        <p>Usalo en EliteBid para verificar tu correo y crear tu contrasena definitiva.</p>
         <p style="font-size: 30px; font-weight: 800; letter-spacing: 6px; margin: 24px 0;">${safeCode}</p>
         <p>El codigo vence en 15 minutos. Si no lo pediste, podes ignorar este mensaje.</p>
       </div>
     `,
     text: [
-      `Hola ${name || ''}, ya creamos tu cuenta como invitado en EliteBid.`,
-      'Usa este codigo de un solo uso para crear tu contrasena definitiva y verificar la cuenta.',
+      `Hola ${name || ''}, este codigo confirma que el email te pertenece.`,
+      'Usalo en EliteBid para verificar tu correo y crear tu contrasena definitiva.',
       `Codigo: ${code}`,
       'El codigo vence en 15 minutos.'
+    ].join('\n\n')
+  };
+}
+
+function buildAccountReviewContent({ accepted, name }) {
+  const firstName = escapeHtml(name || 'tu cuenta');
+  const title = accepted ? 'Cuenta aceptada por EliteBid' : 'Cuenta no aceptada por EliteBid';
+  const message = accepted
+    ? 'La empresa valido tus datos iniciales. En otro mail vas a recibir un codigo para verificar tu correo y crear tu clave.'
+    : 'La empresa no pudo aceptar tus datos iniciales. Si crees que es un error, comunicate con EliteBid.';
+
+  return {
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <h1 style="font-size: 22px;">${title}</h1>
+        <p>Hola ${firstName},</p>
+        <p>${message}</p>
+      </div>
+    `,
+    text: [
+      `Hola ${name || ''},`,
+      title,
+      message
     ].join('\n\n')
   };
 }
@@ -146,6 +180,7 @@ function escapeHtml(value) {
 
 module.exports = {
   buildVerificationUrl,
+  sendAccountReviewEmail,
   sendPasswordResetEmail,
   sendVerificationEmail
 };

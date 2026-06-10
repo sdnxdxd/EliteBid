@@ -32,6 +32,7 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
   const [filter, setFilter] = useState('todas');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  const publicGuest = user?.guestMode || !user?.clienteId;
 
   useEffect(() => {
     let mounted = true;
@@ -39,7 +40,7 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
     async function load() {
       const [rows, favorites] = await Promise.all([
         getAuctionList(user.clienteId),
-        getFavoriteAuctionIds(user.clienteId)
+        publicGuest ? Promise.resolve([]) : getFavoriteAuctionIds(user.clienteId)
       ]);
 
       if (mounted) {
@@ -54,7 +55,7 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
     return () => {
       mounted = false;
     };
-  }, [user.clienteId]);
+  }, [publicGuest, user.clienteId]);
 
   const filteredAuctions = useMemo(() => {
     if (filter === 'todas') return auctions;
@@ -65,6 +66,11 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
   const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
 
   async function toggleFavorite(auctionId) {
+    if (publicGuest) {
+      setToast('Registrate para guardar favoritos y participar.');
+      return;
+    }
+
     const wasFavorite = favoriteIds.includes(auctionId);
     const nextIds = await toggleFavoriteAuction(user.clienteId, auctionId);
 
@@ -122,7 +128,7 @@ export default function AuctionsScreen({ onBack, onNavigate, onOpenAuctionDetail
                 isFavorite={favoriteSet.has(auction.id)}
                 key={auction.id}
                 onPress={() => onOpenAuctionDetail?.(auction.id, 'auctions')}
-                onToggleFavorite={() => toggleFavorite(auction.id)}
+                onToggleFavorite={publicGuest ? undefined : () => toggleFavorite(auction.id)}
               />
             ))}
           </View>
@@ -169,19 +175,21 @@ function AuctionRow({ auction, isFavorite, onPress, onToggleFavorite }) {
           </Text>
         </View>
       </View>
-      <Pressable
-        onPress={(event) => {
-          event?.stopPropagation?.();
-          onToggleFavorite?.();
-        }}
-        style={styles.favoriteButton}
-      >
-        <MaterialCommunityIcons
-          color={isFavorite ? colors.secondary : colors.onSurfaceVariant}
-          name={isFavorite ? 'heart' : 'heart-outline'}
-          size={22}
-        />
-      </Pressable>
+      {onToggleFavorite ? (
+        <Pressable
+          onPress={(event) => {
+            event?.stopPropagation?.();
+            onToggleFavorite?.();
+          }}
+          style={styles.favoriteButton}
+        >
+          <MaterialCommunityIcons
+            color={isFavorite ? colors.secondary : colors.onSurfaceVariant}
+            name={isFavorite ? 'heart' : 'heart-outline'}
+            size={22}
+          />
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }

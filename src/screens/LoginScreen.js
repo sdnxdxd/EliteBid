@@ -17,7 +17,7 @@ import { login } from '../backend/authService';
 import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii, shadows } from '../theme';
 
-export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onResendVerification }) {
+export default function LoginScreen({ onForgotPassword, onGuestBrowse, onLogin, onRegister, onResendVerification }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -75,7 +75,7 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onR
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Iniciar sesion</Text>
           <Text style={styles.panelCopy}>
-            Ingresa con tu clave. Si tu cuenta esta pendiente, usa el codigo de un solo uso como clave.
+            Ingresa con tu clave usando mail o documento. Si todavia no tenes cuenta, podes explorar el catalogo como invitado.
           </Text>
 
           <View style={styles.fieldGroup}>
@@ -134,8 +134,8 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onR
                 <MaterialCommunityIcons color={colors.primary} name="email-sync-outline" size={18} />
               </View>
               <View style={styles.assistCopy}>
-                <Text style={styles.assistTitle}>Reenviar codigo de invitado</Text>
-                <Text style={styles.assistText}>Valida tu cuenta antes de emitir otro codigo.</Text>
+                <Text style={styles.assistTitle}>Reenviar codigo de email</Text>
+                <Text style={styles.assistText}>Verifica tu correo para terminar el alta.</Text>
               </View>
               <MaterialCommunityIcons color={colors.onSurfaceVariant} name="chevron-right" size={20} />
             </Pressable>
@@ -165,6 +165,11 @@ export default function LoginScreen({ onForgotPassword, onLogin, onRegister, onR
 
           <Pressable onPress={onRegister} style={styles.secondaryButton}>
             <Text style={styles.secondaryButtonText}>Registrarse</Text>
+          </Pressable>
+
+          <Pressable onPress={onGuestBrowse} style={styles.guestButton}>
+            <MaterialCommunityIcons color={colors.primary} name="eye-outline" size={18} />
+            <Text style={styles.guestButtonText}>Entrar como invitado</Text>
           </Pressable>
 
           <View style={styles.demoBox}>
@@ -213,6 +218,20 @@ const styles = StyleSheet.create({
   },
   fieldGroup: {
     marginBottom: 16
+  },
+  guestButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    height: 46,
+    justifyContent: 'center',
+    marginTop: 8
+  },
+  guestButtonText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase'
   },
   eyeButton: {
     alignItems: 'center',

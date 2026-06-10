@@ -24,6 +24,15 @@ import { colors } from './src/theme';
 
 const splashImage = require('./assets/splash.png');
 const SPLASH_DURATION_MS = 3500;
+const publicGuestUser = {
+  categoria: 'invitado',
+  clienteId: null,
+  email: '',
+  estado: 'publico',
+  guestMode: true,
+  nombre: 'Invitado',
+  rol: 'invitado'
+};
 
 export default function App() {
   const [booting, setBooting] = useState(true);
@@ -89,7 +98,9 @@ export default function App() {
   }, [booting, splashProgress]);
 
   async function handleSignOut() {
-    await signOut(user?.sessionToken);
+    if (!user?.guestMode) {
+      await signOut(user?.sessionToken);
+    }
     setUser(null);
     setAuthView('login');
     setAppView('home');
@@ -107,6 +118,10 @@ export default function App() {
   }
 
   function navigateTab(tab) {
+    if (user?.guestMode && ['favorites', 'purchases', 'profile'].includes(tab)) {
+      return;
+    }
+
     if (user?.rol === 'invitado' && ['favorites', 'purchases'].includes(tab)) {
       return;
     }
@@ -130,8 +145,24 @@ export default function App() {
   }
 
   function openNotifications(fromView = appView || 'home') {
+    if (user?.guestMode) {
+      return;
+    }
+
     setNotificationsBackView(fromView);
     setAppView('notifications');
+  }
+
+  function browseAsGuest() {
+    setUser(publicGuestUser);
+    setAuthView('login');
+    setAppView('home');
+  }
+
+  function registerFromGuest() {
+    setUser(null);
+    setAppView('home');
+    setAuthView('register');
   }
 
   function handleNotificationAction(result) {
@@ -203,9 +234,11 @@ export default function App() {
         ) : (
           <HomeScreen
             onNavigate={navigateTab}
+            onCreateAccount={user?.guestMode ? registerFromGuest : undefined}
             onOpenAuctionDetail={openAuctionDetail}
             onOpenAuctions={() => setAppView('auctions')}
             onOpenNotifications={() => openNotifications('home')}
+            onSignOut={user?.guestMode ? handleSignOut : undefined}
             user={user}
           />
         )
@@ -300,9 +333,11 @@ export default function App() {
       ) : user ? (
         <HomeScreen
           onNavigate={navigateTab}
+          onCreateAccount={user?.guestMode ? registerFromGuest : undefined}
           onOpenAuctionDetail={openAuctionDetail}
           onOpenAuctions={() => setAppView('auctions')}
           onOpenNotifications={() => openNotifications('home')}
+          onSignOut={user?.guestMode ? handleSignOut : undefined}
           user={user}
         />
       ) : authView === 'register' ? (
@@ -322,6 +357,7 @@ export default function App() {
       ) : (
         <LoginScreen
           onForgotPassword={() => setAuthView('reset')}
+          onGuestBrowse={browseAsGuest}
           onLogin={handleAuthenticated}
           onRegister={() => setAuthView('register')}
           onResendVerification={() => setAuthView('resendVerification')}

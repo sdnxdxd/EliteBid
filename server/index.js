@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 
 const { first, query, run } = require('./db');
-const { sendPasswordResetEmail, sendVerificationEmail } = require('./emailService');
+const { sendAccountReviewEmail, sendPasswordResetEmail, sendVerificationEmail } = require('./emailService');
 const { initDatabase } = require('./initDatabase');
 const { hashPassword, verifyPassword } = require('./passwordHash');
 
@@ -212,6 +212,11 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
     toMysqlDateTime(new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000))
   ]);
 
+  const accountReviewResult = await sendAccountReviewForUser({
+    accepted: true,
+    email: form.email,
+    name: form.firstName
+  });
   const emailResult = await sendVerificationForUser({
     email: form.email,
     name: form.firstName,
@@ -220,6 +225,7 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
 
   res.json({
     ...toSessionUser(user, token),
+    accountReviewEmailSent: accountReviewResult.sent,
     verificationPending: true,
     verificationEmailSent: emailResult.sent
   });
@@ -269,6 +275,11 @@ app.post(['/api/auth/register/paso1', '/api/auth/registro/fase1'], wrap(async (r
   );
 
   const user = await first('SELECT id FROM usuarios WHERE lower(email) = ? LIMIT 1', [form.email]);
+  const accountReviewResult = await sendAccountReviewForUser({
+    accepted: true,
+    email: form.email,
+    name: form.firstName
+  });
   const emailResult = await sendVerificationForUser({
     email: form.email,
     name: form.firstName,
@@ -278,6 +289,7 @@ app.post(['/api/auth/register/paso1', '/api/auth/registro/fase1'], wrap(async (r
   res.status(201).json({
     email: form.email,
     estado: 'pendiente',
+    accountReviewEmailSent: accountReviewResult.sent,
     registrationId: String(user.id),
     verificationEmailSent: emailResult.sent
   });
@@ -852,16 +864,19 @@ app.get('/api/subastas', wrap(async (req, res) => {
 
 app.get('/api/subastas/:auctionId/catalogo', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
-  const detail = await getAuctionDetail(parsePositiveInt(req.params.auctionId, 'Subasta invalida.'), viewer.clienteId);
-  res.json({ catalogo: [toCatalogLot(detail)] });
+  const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
+  const catalog = await getAuctionCatalogLots(auctionId, viewer);
+  res.json({ catalogo: catalog.map(toCatalogLot) });
 }));
 
 app.get('/api/subastas/:auctionId/catalogo/:itemId', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
-  const detail = await getAuctionDetail(parsePositiveInt(req.params.auctionId, 'Subasta invalida.'), viewer.clienteId);
+  const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
   const itemId = parsePositiveInt(req.params.itemId, 'Item invalido.');
-  if (Number(detail.itemId) !== itemId && Number(detail.productId) !== itemId) throw new Error('No encontramos ese item.');
-  res.json(toCatalogLot(detail));
+  const catalog = await getAuctionCatalogLots(auctionId, viewer);
+  const lot = catalog.find((detail) => Number(detail.itemId) === itemId || Number(detail.productId) === itemId);
+  if (!lot) throw new Error('No encontramos ese item.');
+  res.json(toCatalogLot(lot));
 }));
 
 app.get('/api/subastas/:auctionId/stream', wrap(async (req, res) => {
@@ -1335,7 +1350,12 @@ async function getAuctionRows(viewer = null) {
       GREATEST(0, TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), i.timer_vencimiento)) AS timerSecondsRemaining
      FROM subastas s
      JOIN catalogos c ON c.subasta = s.identificador
-     JOIN items_catalogo i ON i.catalogo = c.identificador
+     JOIN (
+       SELECT catalogo, MIN(identificador) AS item_id
+       FROM items_catalogo
+       GROUP BY catalogo
+     ) catalogo_principal ON catalogo_principal.catalogo = c.identificador
+     JOIN items_catalogo i ON i.identificador = catalogo_principal.item_id
      JOIN productos p ON p.identificador = i.producto
      ${restrictedCatalog ? "WHERE s.estado = 'programada'" : ''}
      ORDER BY CASE s.estado WHEN 'abierta' THEN 0 WHEN 'programada' THEN 1 ELSE 2 END, s.fecha ASC`
@@ -1347,6 +1367,7 @@ async function getAuctionRows(viewer = null) {
 async function getAuctionDetail(auctionId, clienteId) {
   await settleExpiredAuctionTimers();
   const viewer = await getViewer(clienteId);
+  const restrictedCatalog = !viewer || viewer.rol === 'invitado';
   const auction = await first(
     `SELECT s.identificador AS id, s.titulo AS title, DATE_FORMAT(s.fecha, '%Y-%m-%d') AS date,
       s.hora AS time, s.estado AS status, s.categoria AS category, s.moneda AS currency,
@@ -1370,27 +1391,51 @@ async function getAuctionDetail(auctionId, clienteId) {
     [auctionId]
   );
   if (!auction) throw new Error('No encontramos esa subasta.');
-  if (viewer?.rol === 'invitado' && auction.status !== 'programada') {
+  if (restrictedCatalog && auction.status !== 'programada') {
     throw new Error('Como invitado solo podes ver subastas futuras.');
   }
 
-  const payment = await first(
-    `SELECT COUNT(*) AS verifiedPayments FROM medios_pago WHERE cliente = ? AND verificado = 'si'`,
-    [clienteId]
-  );
+  const payment = restrictedCatalog
+    ? { verifiedPayments: 0 }
+    : await first(
+      `SELECT COUNT(*) AS verifiedPayments FROM medios_pago WHERE cliente = ? AND verificado = 'si'`,
+      [clienteId]
+    );
 
   const detail = {
     ...auction,
-    bidFeed: viewer?.rol === 'invitado' ? [] : await getAuctionBidFeed(auction.itemId),
-    closure: await getAuctionClosure(auction.itemId, clienteId),
-    isFavorite: viewer?.rol === 'invitado' ? false : await isFavoriteAuction(clienteId, auctionId),
+    catalog: await getAuctionCatalogLots(auctionId, viewer),
+    bidFeed: restrictedCatalog ? [] : await getAuctionBidFeed(auction.itemId),
+    closure: restrictedCatalog ? null : await getAuctionClosure(auction.itemId, clienteId),
+    isFavorite: restrictedCatalog ? false : await isFavoriteAuction(clienteId, auctionId),
     eligibility: {
-      categoryOk: viewer?.rol !== 'invitado' && await hasCategoryAccess(clienteId, auction.category),
-      verifiedPayments: viewer?.rol === 'invitado' ? 0 : payment?.verifiedPayments ?? 0
+      categoryOk: !restrictedCatalog && await hasCategoryAccess(clienteId, auction.category),
+      verifiedPayments: restrictedCatalog ? 0 : payment?.verifiedPayments ?? 0
     }
   };
 
-  return viewer?.rol === 'invitado' ? redactAuctionPrice(detail) : detail;
+  return restrictedCatalog ? redactAuctionPrice(detail) : detail;
+}
+
+async function getAuctionCatalogLots(auctionId, viewer = null) {
+  const restrictedCatalog = !viewer || viewer.rol === 'invitado';
+  const rows = await query(
+    `SELECT s.identificador AS id, s.estado AS status, s.titulo AS auctionTitle,
+      p.descripcion_catalogo AS description, p.descripcion_completa AS fullDescription,
+      p.identificador AS productId, p.imagen_uri AS imageUrl,
+      i.identificador AS itemId, i.precio_base AS basePrice, i.puja_actual AS currentBid,
+      i.comision AS commission, i.subastado AS sold, i.cierre_estado AS closureStatus,
+      i.timer_inicio AS timerStartedAt, i.timer_vencimiento AS timerExpiresAt
+     FROM subastas s
+     JOIN catalogos c ON c.subasta = s.identificador
+     JOIN items_catalogo i ON i.catalogo = c.identificador
+     JOIN productos p ON p.identificador = i.producto
+     WHERE s.identificador = ?
+     ORDER BY i.identificador ASC`,
+    [auctionId]
+  );
+
+  return restrictedCatalog ? rows.map(redactAuctionPrice) : rows;
 }
 
 async function enterAuctionRoom(clienteId, auctionId) {
@@ -2180,7 +2225,7 @@ function toCatalogLot(detail) {
     estado: detail.status,
     fotos: detail.imageUrl ? [detail.imageUrl] : [],
     loteId: String(detail.itemId || detail.productId || detail.id),
-    nombre: detail.title,
+    nombre: detail.title || detail.auctionTitle || detail.description,
     precioBase: detail.basePrice,
     pujaActual: detail.currentBid
   };
@@ -2286,6 +2331,26 @@ async function sendVerificationForUser({ email, name, token }) {
   const timeoutPromise = new Promise((resolve) => {
     timeoutId = setTimeout(() => {
       console.warn(`Envio de verificacion a ${email} demorado. La cuenta queda pendiente y puede reintentar.`);
+      resolve({ sent: false, skipped: false, reason: 'send_timeout' });
+    }, timeoutMs);
+  });
+
+  const result = await Promise.race([sendPromise, timeoutPromise]);
+  clearTimeout(timeoutId);
+  return result;
+}
+
+async function sendAccountReviewForUser({ accepted = true, email, name }) {
+  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 6000);
+  const sendPromise = sendAccountReviewEmail({ accepted, to: email, name }).catch((error) => {
+    console.warn(`No se pudo enviar validacion de cuenta a ${email}: ${error.message}`);
+    return { sent: false, skipped: false, reason: 'send_failed' };
+  });
+
+  let timeoutId;
+  const timeoutPromise = new Promise((resolve) => {
+    timeoutId = setTimeout(() => {
+      console.warn(`Envio de validacion de cuenta a ${email} demorado. Se continua con el codigo de email.`);
       resolve({ sent: false, skipped: false, reason: 'send_timeout' });
     }, timeoutMs);
   });
@@ -3067,7 +3132,7 @@ function capitalizeWord(word) {
 
 app.use(errorHandler);
 
-const port = Number(process.env.API_PORT || 3001);
+const port = Number(process.env.PORT || process.env.API_PORT || 3001);
 
 async function start() {
   if (process.env.DB_AUTO_INIT !== 'false') await initDatabase();

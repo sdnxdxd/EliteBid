@@ -87,7 +87,7 @@ export default function VerificationPanel({
         confirmPassword: form.confirmPassword
       });
       setForm({ code: '', password: '', confirmPassword: '' });
-      setFeedback('Cuenta verificada. Ya podes agregar medios de pago y participar.');
+      setFeedback('Email verificado. Ya podes agregar medios de pago y participar.');
       onVerified(user);
     } catch (verificationError) {
       setFeedback('', verificationError.message);
@@ -109,7 +109,7 @@ export default function VerificationPanel({
             <MaterialCommunityIcons color={colors.onPrimaryFixed} name="shield-key-outline" size={22} />
           </View>
           <View style={styles.copy}>
-            <Text style={styles.title}>Cuenta pendiente</Text>
+            <Text style={styles.title}>Email pendiente</Text>
             <Text style={styles.text}>Revisa tu mail, ingresa el codigo de un solo uso y crea tu contrasena.</Text>
           </View>
         </View>
