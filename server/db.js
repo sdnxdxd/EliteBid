@@ -2,13 +2,13 @@ const mysql = require('mysql2/promise');
 
 require('dotenv').config();
 
-const database = process.env.DB_NAME || 'elitebid';
+const database = process.env.DB_NAME || process.env.MYSQL_ADDON_DB || 'elitebid';
 
 const baseConfig = {
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
+  host: process.env.DB_HOST || process.env.MYSQL_ADDON_HOST || '127.0.0.1',
+  port: Number(process.env.DB_PORT || process.env.MYSQL_ADDON_PORT || 3306),
+  user: process.env.DB_USER || process.env.MYSQL_ADDON_USER || 'root',
+  password: process.env.DB_PASSWORD || process.env.MYSQL_ADDON_PASSWORD || '',
   multipleStatements: true,
   ...(process.env.DB_SSL === 'true' ? { ssl: { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' } } : {})
 };

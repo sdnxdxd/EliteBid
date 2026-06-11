@@ -13,9 +13,34 @@ Objetivo: dejar la API de EliteBid accesible en una URL publica para probar endp
 ## Recomendacion elegida
 
 - API: Render.
-- Base de datos: Railway MySQL.
+- Base de datos: Railway MySQL o Clever Cloud MySQL.
 
 Esta combinacion deja una URL publica para el backend y una base MySQL remota para que la app y Postman prueben endpoints fuera de la PC local.
+
+## Clever Cloud MySQL
+
+Si la base es Clever Cloud, se pueden cargar directamente estas variables en Render:
+
+```env
+MYSQL_ADDON_HOST=
+MYSQL_ADDON_PORT=3306
+MYSQL_ADDON_USER=
+MYSQL_ADDON_PASSWORD=
+MYSQL_ADDON_DB=
+DB_CREATE_DATABASE=false
+DB_AUTO_INIT=true
+DB_SSL=false
+```
+
+El backend tambien acepta el mapeo equivalente:
+
+```env
+DB_HOST=MYSQL_ADDON_HOST
+DB_PORT=MYSQL_ADDON_PORT
+DB_USER=MYSQL_ADDON_USER
+DB_PASSWORD=MYSQL_ADDON_PASSWORD
+DB_NAME=MYSQL_ADDON_DB
+```
 
 ## Paso 1 - Railway MySQL
 
