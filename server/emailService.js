@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
+const dns = require('node:dns');
 
 require('dotenv').config();
 
@@ -55,6 +56,7 @@ async function sendMail({ to, subject, content, fallbackLog }) {
         pass: process.env.MAIL_PASSWORD
       },
       family: Number(process.env.SMTP_FAMILY || 4),
+      lookup: lookupSmtpIpv4,
       connectionTimeout: Number(process.env.SMTP_TIMEOUT_MS || 20000),
       greetingTimeout: Number(process.env.SMTP_TIMEOUT_MS || 20000),
       socketTimeout: Number(process.env.SMTP_TIMEOUT_MS || 20000)
@@ -99,6 +101,10 @@ async function sendWithResend({ to, subject, content }) {
 
 function hasSmtpConfig() {
   return Boolean(process.env.SMTP_HOST && process.env.MAIL_USER && process.env.MAIL_PASSWORD);
+}
+
+function lookupSmtpIpv4(hostname, _options, callback) {
+  dns.lookup(hostname, { family: 4, all: false }, callback);
 }
 
 function hasEmailProviderConfig() {
