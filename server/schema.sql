@@ -276,3 +276,27 @@ CREATE TABLE IF NOT EXISTS fotos_lote (
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_fotos_lote_solicitud FOREIGN KEY (solicitud) REFERENCES solicitudes_lotes (identificador) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS productos_solicitud_lote (
+  identificador INT AUTO_INCREMENT PRIMARY KEY,
+  solicitud INT NOT NULL,
+  orden_lote INT NOT NULL,
+  titulo VARCHAR(180) NOT NULL,
+  tipo_bien VARCHAR(120) NOT NULL,
+  cantidad INT NOT NULL DEFAULT 1,
+  valor_estimado DECIMAL(14,2) DEFAULT 0,
+  descripcion TEXT NOT NULL,
+  estado_conservacion TEXT NOT NULL,
+  historia TEXT NOT NULL,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_productos_solicitud_lote_solicitud FOREIGN KEY (solicitud) REFERENCES solicitudes_lotes (identificador) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS fotos_producto_solicitud_lote (
+  identificador INT AUTO_INCREMENT PRIMARY KEY,
+  producto_solicitud INT NOT NULL,
+  uri MEDIUMTEXT NOT NULL,
+  orden INT NOT NULL,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_fotos_producto_solicitud_lote_producto FOREIGN KEY (producto_solicitud) REFERENCES productos_solicitud_lote (identificador) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

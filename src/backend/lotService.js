@@ -46,15 +46,24 @@ function isSessionError(error) {
 }
 
 function toSaleRequestInput(payload) {
+  const items = Array.isArray(payload.items) ? payload.items.map((item) => ({
+    ...item,
+    fotos: item.photoUris?.length || 0,
+    nombreBien: item.title,
+    precioEstimado: item.estimatedValue,
+    uploadIds: item.photoUris
+  })) : [];
+
   return {
     ...payload,
     declaracionPropiedad: payload.ownershipDeclaration,
     descripcion: payload.description,
-    fotos: payload.photoUris?.length || 0,
+    fotos: items.reduce((total, item) => total + (item.fotos || 0), 0),
+    items,
     composicion: payload.composition,
     nombreBien: payload.title,
     precioEstimado: payload.estimatedValue,
     tipoLote: payload.lotKind,
-    uploadIds: payload.photoUris
+    uploadIds: items.flatMap((item) => item.uploadIds || [])
   };
 }

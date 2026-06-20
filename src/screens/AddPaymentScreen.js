@@ -154,6 +154,7 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
           <Field
             keyboardType="numeric"
             label="Monto garantia en pesos argentinos"
+            maxLength={12}
             onChangeText={(value) => updateField('amount', value)}
             placeholder="500000"
             value={form.amount}
@@ -191,6 +192,10 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
 }
 
 function CardForm({ form, updateField }) {
+  const cardDigits = onlyDigits(form.cardNumber);
+  const cardNumberComplete = cardDigits.length >= 13;
+  const cardNumberValid = isValidCardNumber(cardDigits);
+
   return (
     <>
       <View style={styles.cardPreview}>
@@ -219,6 +224,18 @@ function CardForm({ form, updateField }) {
         placeholder="0000 0000 0000 0000"
         value={form.cardNumber}
       />
+      {cardNumberComplete ? (
+        <View style={styles.cardValidationRow}>
+          <MaterialCommunityIcons
+            color={cardNumberValid ? '#73E6A2' : colors.error}
+            name={cardNumberValid ? 'check-circle-outline' : 'alert-circle-outline'}
+            size={17}
+          />
+          <Text style={[styles.cardValidationText, !cardNumberValid && styles.cardValidationTextError]}>
+            {cardNumberValid ? 'Numero de tarjeta valido.' : 'Revisa el numero de tarjeta.'}
+          </Text>
+        </View>
+      ) : null}
       <Field
         label="Nombre del titular"
         onChangeText={(value) => updateField('cardHolder', value)}
@@ -356,6 +373,10 @@ function validatePaymentForm(form) {
     }
   }
 
+  if (form.type === 'tarjeta') {
+    if (!isValidCardNumber(form.cardNumber)) return 'Ingresa un numero de tarjeta valido.';
+  }
+
   if (form.type === 'cheque') {
     const checkNumberLength = onlyDigits(form.checkNumber).length;
     if (!form.bank.trim()) return 'Ingresa el banco emisor.';
@@ -397,6 +418,24 @@ function formatCardNumber(value) {
   return digits.replace(/(.{4})/g, '$1 ').trim();
 }
 
+function isValidCardNumber(value) {
+  const digits = onlyDigits(value);
+  if (!/^\d{13,16}$/.test(digits)) return false;
+
+  let sum = 0;
+  let shouldDouble = false;
+  for (let index = digits.length - 1; index >= 0; index -= 1) {
+    let digit = Number(digits[index]);
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+  return sum % 10 === 0;
+}
+
 function formatExpiry(value) {
   const digits = onlyDigits(value).slice(0, 4);
 
@@ -421,6 +460,21 @@ function formatIssueDate(value) {
 }
 
 const styles = StyleSheet.create({
+  cardValidationRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    marginBottom: 14,
+    marginTop: -8
+  },
+  cardValidationText: {
+    color: '#73E6A2',
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  cardValidationTextError: {
+    color: colors.error
+  },
   cardBottomRow: {
     flexDirection: 'row',
     justifyContent: 'space-between'

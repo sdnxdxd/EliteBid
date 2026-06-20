@@ -21,23 +21,31 @@ import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import ErrorDialog from '../components/ErrorDialog';
 import { colors, radii } from '../theme';
 
-const initialForm = {
-  title: '',
-  lotKind: 'unico',
-  itemType: '',
-  quantity: '1',
-  estimatedValue: '',
-  composition: '',
-  description: '',
-  condition: '',
-  history: '',
+function createEmptyProduct() {
+  return {
+    title: '',
+    itemType: '',
+    quantity: '1',
+    estimatedValue: '',
+    description: '',
+    condition: '',
+    history: '',
+    photoUris: []
+  };
+}
+
+function createInitialForm() {
+  return {
+    title: '',
   legalOrigin: '',
   payoutBank: '',
   payoutAccountHolder: '',
   payoutReference: '',
   ownershipDeclaration: false,
-  returnChargeAccepted: false
-};
+    returnChargeAccepted: false,
+    items: [createEmptyProduct()]
+  };
+}
 
 const statusCopy = {
   aceptado: {
@@ -70,10 +78,9 @@ const statusCopy = {
 export default function PurchasesScreen({ onBack, onNavigate, user }) {
   const [activeView, setActiveView] = useState('form');
   const [errorDialog, setErrorDialog] = useState('');
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(createInitialForm);
   const [lots, setLots] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [photoUris, setPhotoUris] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -128,11 +135,29 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  async function pickPhoto(source) {
+  function updateItem(index, key, value) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item)
+    }));
+  }
+
+  function addItem() {
+    setForm((current) => ({ ...current, items: [...current.items, createEmptyProduct()] }));
+  }
+
+  function removeItem(index) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.length > 1 ? current.items.filter((_, itemIndex) => itemIndex !== index) : current.items
+    }));
+  }
+
+  async function pickPhoto(itemIndex, source) {
     setErrorDialog('');
 
-    if (photoUris.length >= 10) {
-      setErrorDialog('Carga hasta 10 fotos por solicitud.');
+    if (form.items[itemIndex]?.photoUris.length >= 10) {
+      setErrorDialog(`Carga hasta 10 fotos para el producto ${itemIndex + 1}.`);
       return;
     }
 
@@ -168,21 +193,24 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
         ? `data:${asset.mimeType ?? 'image/jpeg'};base64,${asset.base64}`
         : asset.uri;
 
-    setPhotoUris((current) => [...current, uri]);
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((item, index) => index === itemIndex ? { ...item, photoUris: [...item.photoUris, uri] } : item)
+    }));
   }
 
-  function removePhoto(index) {
-    setPhotoUris((current) => current.filter((_, currentIndex) => currentIndex !== index));
+  function removePhoto(itemIndex, photoIndex) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((item, index) => index === itemIndex
+        ? { ...item, photoUris: item.photoUris.filter((_, currentIndex) => currentIndex !== photoIndex) }
+        : item)
+    }));
   }
 
   function validateForm() {
     const required = [
       ['title', 'Ingresa el nombre de la venta.'],
-      ['itemType', 'Ingresa el tipo de lote o categoria principal.'],
-      ['quantity', 'Ingresa la cantidad de productos o piezas.'],
-      ['description', 'Describe la venta que queres subastar.'],
-      ['condition', 'Indica el estado de conservacion.'],
-      ['history', 'Agrega la historia o datos relevantes del bien.'],
       ['legalOrigin', 'Indica como podes acreditar el origen licito.'],
       ['payoutBank', 'Ingresa el banco de la cuenta de cobro.'],
       ['payoutAccountHolder', 'Ingresa el titular de la cuenta de cobro.'],
@@ -194,14 +222,24 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
         return message;
       }
     }
-    if (Number(form.quantity) < 1 || Number(form.quantity) > 999) {
-      return 'Ingresa una cantidad de piezas valida.';
-    }
-    if (form.lotKind === 'variado' && !form.composition.trim()) {
-      return 'Detalla que productos distintos componen el lote variado.';
-    }
-    if (photoUris.length < 6) {
-      return 'Carga al menos 6 fotos del bien o lote.';
+    for (const [index, item] of form.items.entries()) {
+      const productNumber = index + 1;
+      const requiredItemFields = [
+        ['title', `Ingresa el nombre del producto ${productNumber}.`],
+        ['itemType', `Ingresa la categoria del producto ${productNumber}.`],
+        ['description', `Describe el producto ${productNumber}.`],
+        ['condition', `Indica el estado de conservacion del producto ${productNumber}.`],
+        ['history', `Agrega datos relevantes del producto ${productNumber}.`]
+      ];
+      for (const [key, message] of requiredItemFields) {
+        if (!String(item[key] ?? '').trim()) return message;
+      }
+      if (Number(item.quantity) < 1 || Number(item.quantity) > 999) {
+        return `Ingresa una cantidad de piezas valida para el producto ${productNumber}.`;
+      }
+      if (item.photoUris.length < 6) {
+        return `Carga al menos 6 fotos para el producto ${productNumber}.`;
+      }
     }
     if (!form.ownershipDeclaration) {
       return 'Debes declarar que el bien te pertenece y no tiene impedimentos.';
@@ -226,11 +264,11 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
     try {
       const rows = await submitUserLot(user.clienteId, {
         ...form,
-        photoUris
+        lotKind: form.items.length > 1 ? 'variado' : 'unico',
+        photoUris: form.items.flatMap((item) => item.photoUris)
       });
       setLots(rows);
-      setForm(initialForm);
-      setPhotoUris([]);
+      setForm(createInitialForm());
       setActiveView('status');
       setToast({ message: 'Lote cargado. Quedo pendiente de habilitacion.', tone: 'success' });
     } catch (error) {
@@ -266,7 +304,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
         <View style={styles.hero}>
           <Text style={styles.title}>Ventas para subastar</Text>
           <Text style={styles.subtitle}>
-            Carga un producto unico o un lote variado, adjunta fotos y segui la revision.
+            Armá un lote: cada producto lleva su propia ficha, descripción y fotos.
           </Text>
         </View>
 
@@ -284,12 +322,14 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
         {activeView === 'form' ? (
           <LotForm
             form={form}
+            onAddItem={addItem}
             onPickPhoto={pickPhoto}
+            onRemoveItem={removeItem}
             onRemovePhoto={removePhoto}
             onSubmit={submitLot}
-            photoUris={photoUris}
             submitting={submitting}
             updateField={updateField}
+            updateItem={updateItem}
           />
         ) : (
           <LotStatusList loading={loading} lots={lots} onRefresh={loadLots} />
@@ -308,74 +348,36 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
   );
 }
 
-function LotForm({ form, onPickPhoto, onRemovePhoto, onSubmit, photoUris, submitting, updateField }) {
+function LotForm({ form, onAddItem, onPickPhoto, onRemoveItem, onRemovePhoto, onSubmit, submitting, updateField, updateItem }) {
   return (
     <View style={styles.form}>
-      <SectionHeader icon="package-variant" title="Datos de la venta" />
-      <Text style={styles.label}>Tipo de venta</Text>
-      <View style={styles.kindSelector}>
-        <LotKindButton
-          active={form.lotKind === 'unico'}
-          icon="package"
-          label="Producto unico"
-          onPress={() => updateField('lotKind', 'unico')}
-        />
-        <LotKindButton
-          active={form.lotKind === 'variado'}
-          icon="package-variant-closed-plus"
-          label="Lote variado"
-          onPress={() => updateField('lotKind', 'variado')}
-        />
-      </View>
-      <Field label="Nombre de la venta" onChangeText={(value) => updateField('title', value)} value={form.title} />
-      <Field label="Categoria principal" onChangeText={(value) => updateField('itemType', value)} value={form.itemType} />
+      <SectionHeader icon="package-variant" title="Datos del lote" />
+      <Text style={styles.sectionHint}>Cada ficha se subasta por separado, en el orden en que la agregues.</Text>
       <Field
-        keyboardType="numeric"
-        label="Cantidad de productos o piezas"
-        onChangeText={(value) => updateField('quantity', value)}
-        value={form.quantity}
-      />
-      <Field
-        keyboardType="numeric"
-        label="Valor estimado"
-        onChangeText={(value) => updateField('estimatedValue', value)}
-        placeholder="Opcional"
-        value={form.estimatedValue}
-      />
-      <Field
-        label={form.lotKind === 'variado' ? 'Productos incluidos' : 'Piezas o accesorios incluidos'}
-        multiline
-        onChangeText={(value) => updateField('composition', value)}
-        placeholder={
-          form.lotKind === 'variado'
-            ? 'Ej. reloj de bolsillo, caja musical, dos bandejas de plata y seis copas.'
-            : 'Ej. estuche original, certificado, repuestos o piezas del mismo conjunto.'
-        }
-        value={form.composition}
-      />
-      <Field
-        label="Descripcion general"
-        multiline
-        onChangeText={(value) => updateField('description', value)}
-        placeholder="Materiales, medidas, marcas, autores, detalles distintivos o contexto de la venta."
-        value={form.description}
-      />
-      <Field
-        label="Estado de conservacion"
-        multiline
-        onChangeText={(value) => updateField('condition', value)}
-        placeholder="Detalle desgaste, restauraciones o faltantes."
-        value={form.condition}
+        label="Nombre del lote"
+        onChangeText={(value) => updateField('title', value)}
+        placeholder="Ej. Colección familiar de relojes antiguos"
+        value={form.title}
       />
 
-      <SectionHeader icon="file-document-edit" title="Origen e historia" />
-      <Field
-        label="Historia o datos de interes"
-        multiline
-        onChangeText={(value) => updateField('history', value)}
-        placeholder="Procedencia, duenios anteriores, contexto o curiosidades."
-        value={form.history}
-      />
+      {form.items.map((item, index) => (
+        <ProductForm
+          canRemove={form.items.length > 1}
+          index={index}
+          item={item}
+          key={`product-${index}`}
+          onPickPhoto={onPickPhoto}
+          onRemove={() => onRemoveItem(index)}
+          onRemovePhoto={onRemovePhoto}
+          updateItem={updateItem}
+        />
+      ))}
+      <Pressable onPress={onAddItem} style={styles.addProductButton}>
+        <MaterialCommunityIcons color={colors.primary} name="plus-circle" size={21} />
+        <Text style={styles.addProductText}>Agregar otro producto al lote</Text>
+      </Pressable>
+
+      <SectionHeader icon="file-document-edit" title="Origen y condiciones del lote" />
       <Field
         label="Origen licito"
         multiline
@@ -383,37 +385,6 @@ function LotForm({ form, onPickPhoto, onRemovePhoto, onSubmit, photoUris, submit
         placeholder="Factura, sucesion, donacion, compra anterior u otra prueba disponible."
         value={form.legalOrigin}
       />
-
-      <SectionHeader icon="camera-plus" title={`Fotos de la venta (${photoUris.length}/6 minimo)`} />
-      <Text style={styles.sectionHint}>
-        Inclui vistas generales y detalles de cada producto distinto del lote.
-      </Text>
-      <View style={styles.photoActions}>
-        <Pressable onPress={() => onPickPhoto('camera')} style={styles.secondaryButton}>
-          <MaterialCommunityIcons color={colors.onPrimaryFixed} name="camera" size={18} />
-          <Text style={styles.secondaryButtonText}>Camara</Text>
-        </Pressable>
-        <Pressable onPress={() => onPickPhoto('library')} style={styles.secondaryButton}>
-          <MaterialCommunityIcons color={colors.onPrimaryFixed} name="image-plus" size={18} />
-          <Text style={styles.secondaryButtonText}>Galeria</Text>
-        </Pressable>
-      </View>
-      <View style={styles.photoGrid}>
-        {photoUris.map((uri, index) => (
-          <View key={`${uri}-${index}`} style={styles.photoTile}>
-            <Image source={{ uri }} style={styles.photo} />
-            <Pressable onPress={() => onRemovePhoto(index)} style={styles.removePhoto}>
-              <MaterialCommunityIcons color={colors.onSurface} name="close" size={15} />
-            </Pressable>
-          </View>
-        ))}
-        {Array.from({ length: Math.max(0, 6 - photoUris.length) }).map((_, index) => (
-          <View key={`empty-${index}`} style={styles.photoPlaceholder}>
-            <MaterialCommunityIcons color={colors.onSurfaceVariant} name="image-outline" size={22} />
-            <Text style={styles.photoPlaceholderText}>Foto {photoUris.length + index + 1}</Text>
-          </View>
-        ))}
-      </View>
 
       <SectionHeader icon="bank" title="Cuenta de cobro" />
       <Field label="Titular" onChangeText={(value) => updateField('payoutAccountHolder', value)} value={form.payoutAccountHolder} />
@@ -458,6 +429,88 @@ function LotForm({ form, onPickPhoto, onRemovePhoto, onSubmit, photoUris, submit
   );
 }
 
+function ProductForm({ canRemove, index, item, onPickPhoto, onRemove, onRemovePhoto, updateItem }) {
+  return (
+    <View style={styles.productCard}>
+      <View style={styles.productHeader}>
+        <View>
+          <Text style={styles.productEyebrow}>Artículo {index + 1}</Text>
+          <Text style={styles.productTitle}>Ficha individual del producto</Text>
+        </View>
+        {canRemove ? (
+          <Pressable onPress={onRemove} style={styles.removeProductButton}>
+            <MaterialCommunityIcons color={colors.error} name="trash-can-outline" size={20} />
+          </Pressable>
+        ) : null}
+      </View>
+      <Field label="Nombre del producto" onChangeText={(value) => updateItem(index, 'title', value)} value={item.title} />
+      <Field label="Categoria" onChangeText={(value) => updateItem(index, 'itemType', value)} value={item.itemType} />
+      <Field
+        keyboardType="numeric"
+        label="Cantidad de piezas de este artículo"
+        onChangeText={(value) => updateItem(index, 'quantity', value)}
+        value={item.quantity}
+      />
+      <Field
+        keyboardType="numeric"
+        label="Valor estimado"
+        onChangeText={(value) => updateItem(index, 'estimatedValue', value)}
+        placeholder="Opcional"
+        value={item.estimatedValue}
+      />
+      <Field
+        label="Descripcion"
+        multiline
+        onChangeText={(value) => updateItem(index, 'description', value)}
+        placeholder="Materiales, medidas, marcas, autores y detalles distintivos."
+        value={item.description}
+      />
+      <Field
+        label="Estado de conservacion"
+        multiline
+        onChangeText={(value) => updateItem(index, 'condition', value)}
+        placeholder="Detalle desgaste, restauraciones o faltantes."
+        value={item.condition}
+      />
+      <Field
+        label="Historia o datos de interes"
+        multiline
+        onChangeText={(value) => updateItem(index, 'history', value)}
+        placeholder="Procedencia, dueños anteriores, contexto o curiosidades."
+        value={item.history}
+      />
+      <Text style={styles.label}>Fotos del producto ({item.photoUris.length}/6 mínimo)</Text>
+      <Text style={styles.sectionHint}>Cargá al menos 6 fotos: vistas generales, detalles y posibles marcas o defectos.</Text>
+      <View style={styles.photoActions}>
+        <Pressable onPress={() => onPickPhoto(index, 'camera')} style={styles.secondaryButton}>
+          <MaterialCommunityIcons color={colors.onPrimaryFixed} name="camera" size={18} />
+          <Text style={styles.secondaryButtonText}>Cámara</Text>
+        </Pressable>
+        <Pressable onPress={() => onPickPhoto(index, 'library')} style={styles.secondaryButton}>
+          <MaterialCommunityIcons color={colors.onPrimaryFixed} name="image-plus" size={18} />
+          <Text style={styles.secondaryButtonText}>Galería</Text>
+        </Pressable>
+      </View>
+      <View style={styles.photoGrid}>
+        {item.photoUris.map((uri, photoIndex) => (
+          <View key={`${uri}-${photoIndex}`} style={styles.photoTile}>
+            <Image source={{ uri }} style={styles.photo} />
+            <Pressable onPress={() => onRemovePhoto(index, photoIndex)} style={styles.removePhoto}>
+              <MaterialCommunityIcons color={colors.onSurface} name="close" size={15} />
+            </Pressable>
+          </View>
+        ))}
+        {Array.from({ length: Math.max(0, 6 - item.photoUris.length) }).map((_, photoIndex) => (
+          <View key={`empty-${photoIndex}`} style={styles.photoPlaceholder}>
+            <MaterialCommunityIcons color={colors.onSurfaceVariant} name="image-outline" size={22} />
+            <Text style={styles.photoPlaceholderText}>Foto {item.photoUris.length + photoIndex + 1}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function LotStatusList({ loading, lots, onRefresh }) {
   if (loading) {
     return <ActivityIndicator color={colors.primary} style={styles.loader} />;
@@ -489,7 +542,8 @@ function LotStatusList({ loading, lots, onRefresh }) {
 
 function LotCard({ lot }) {
   const status = statusCopy[lot.status] || statusCopy.pendiente;
-  const photoUri = getDisplayPhotoUri(lot.photoUris?.[0]);
+  const items = lot.items || [];
+  const photoUri = getDisplayPhotoUri(items[0]?.photoUris?.[0] || lot.photoUris?.[0]);
 
   return (
     <View style={styles.lotCard}>
@@ -506,16 +560,16 @@ function LotCard({ lot }) {
             <MaterialCommunityIcons color={status.tone} name={status.icon} size={15} />
             <Text style={[styles.statusText, { color: status.tone }]}>{status.label}</Text>
           </View>
-          <Text style={styles.photoCount}>{lot.photoUris?.length || 0} fotos</Text>
+          <Text style={styles.photoCount}>{items.length || 1} artículos</Text>
         </View>
         <Text numberOfLines={2} style={styles.cardTitle}>{lot.title}</Text>
         <Text style={styles.cardMeta}>
-          {lot.lotKind === 'variado' ? 'Lote variado' : 'Producto unico'} / {lot.quantity} producto{Number(lot.quantity) === 1 ? '' : 's'}
+          {items.length > 1 ? 'Lote con artículos individuales' : 'Producto único'} / {items.length || 1} artículo{(items.length || 1) === 1 ? '' : 's'}
         </Text>
         {lot.composition ? (
           <Text numberOfLines={2} style={styles.cardComposition}>{lot.composition}</Text>
         ) : null}
-        <Text numberOfLines={3} style={styles.cardDescription}>{lot.description}</Text>
+        <Text numberOfLines={3} style={styles.cardDescription}>{items[0]?.description || lot.description}</Text>
         <StatusDetail lot={lot} />
       </View>
     </View>
@@ -622,6 +676,26 @@ function formatMoney(value) {
 }
 
 const styles = StyleSheet.create({
+  addProductButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(168, 139, 250, 0.10)',
+    borderColor: colors.primary,
+    borderRadius: radii.md,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 9,
+    justifyContent: 'center',
+    marginTop: 4,
+    minHeight: 56,
+    paddingHorizontal: 16
+  },
+  addProductText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
   cardBody: {
     flex: 1,
     minWidth: 0,
@@ -914,6 +988,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase'
+  },
+  productCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.025)',
+    borderColor: 'rgba(147, 143, 156, 0.28)',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    marginTop: 10,
+    padding: 15
+  },
+  productEyebrow: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
+  productHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16
+  },
+  productTitle: {
+    color: colors.onSurface,
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 3
+  },
+  removeProductButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 112, 112, 0.12)',
+    borderRadius: radii.full,
+    height: 40,
+    justifyContent: 'center',
+    width: 40
   },
   removePhoto: {
     alignItems: 'center',

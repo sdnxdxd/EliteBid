@@ -15,6 +15,7 @@ const BID_TIMER_SECONDS = 60;
 const FIRST_BID_TIMER_SECONDS = 3 * 60;
 const COMPANY_CLIENT_ID = 4;
 const SHIPPING_COST = 25000;
+const MAX_GUARANTEE_AMOUNT = 999999999999.99;
 const BID_RANGE_LIMIT_CATEGORIES = new Set(['comun', 'especial', 'plata']);
 const categoryRank = { comun: 1, especial: 2, plata: 3, oro: 4, platino: 5 };
 const categoryRequirements = [
@@ -2498,10 +2499,52 @@ async function getUserLots(clienteId) {
        ORDER BY orden ASC, identificador ASC`,
       [row.id]
     );
+    const itemRows = await query(
+      `SELECT identificador AS id, orden_lote AS lotOrder, titulo AS title, tipo_bien AS itemType,
+        cantidad AS quantity, valor_estimado AS estimatedValue, descripcion AS description,
+        estado_conservacion AS conditionText, historia AS history
+       FROM productos_solicitud_lote
+       WHERE solicitud = ?
+       ORDER BY orden_lote ASC, identificador ASC`,
+      [row.id]
+    );
+    const items = [];
+    for (const item of itemRows) {
+      const itemPhotos = await query(
+        `SELECT identificador AS id, uri, orden AS position
+         FROM fotos_producto_solicitud_lote
+         WHERE producto_solicitud = ?
+         ORDER BY orden ASC, identificador ASC`,
+        [item.id]
+      );
+      items.push({
+        ...item,
+        photoUris: itemPhotos.map((photo) => photo.uri),
+        photos: itemPhotos
+      });
+    }
+
+    // Las solicitudes creadas antes de los lotes por articulo siguen siendo visibles.
+    if (!items.length) {
+      items.push({
+        id: `legacy-${row.id}`,
+        lotOrder: 1,
+        title: row.title,
+        itemType: row.itemType,
+        quantity: row.quantity,
+        estimatedValue: row.estimatedValue,
+        description: row.description,
+        conditionText: row.conditionText,
+        history: row.history,
+        photoUris: photos.map((photo) => photo.uri),
+        photos
+      });
+    }
     lots.push({
       ...row,
       photoUris: photos.map((photo) => photo.uri),
       photos,
+      items,
       payoutAccount: parseDetail(row.payoutAccount)
     });
   }
@@ -2534,12 +2577,39 @@ async function createLotSubmission(clienteId, lot) {
     ]
   );
 
-  for (const [index, uri] of lot.photoUris.entries()) {
-    await run('INSERT INTO fotos_lote (solicitud, uri, orden) VALUES (?, ?, ?)', [
-      result.insertId,
-      uri,
-      index + 1
-    ]);
+  let photoOrder = 1;
+  for (const item of lot.items) {
+    const itemResult = await run(
+      `INSERT INTO productos_solicitud_lote (
+        solicitud, orden_lote, titulo, tipo_bien, cantidad, valor_estimado, descripcion, estado_conservacion, historia
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        result.insertId,
+        item.order,
+        item.title,
+        item.itemType,
+        item.quantity,
+        item.estimatedValue,
+        item.description,
+        item.condition,
+        item.history
+      ]
+    );
+
+    for (const [index, uri] of item.photoUris.entries()) {
+      await run('INSERT INTO fotos_producto_solicitud_lote (producto_solicitud, uri, orden) VALUES (?, ?, ?)', [
+        itemResult.insertId,
+        uri,
+        index + 1
+      ]);
+      // Conservamos el listado plano para los consumidores anteriores de la API.
+      await run('INSERT INTO fotos_lote (solicitud, uri, orden) VALUES (?, ?, ?)', [
+        result.insertId,
+        uri,
+        photoOrder
+      ]);
+      photoOrder += 1;
+    }
   }
 
   return result;
@@ -2554,6 +2624,8 @@ function toSaleRequestContract(lot) {
     estado: lot.status,
     fecha: lot.createdAt,
     fotos: lot.photoUris?.length || 0,
+    items: lot.items || [],
+    productos: lot.items || [],
     nombreBien: lot.title,
     precioEstimado: Number(lot.estimatedValue || 0),
     tipoLote: lot.lotKind,
@@ -2959,8 +3031,11 @@ function sanitizePayment(payload) {
   if (!['tarjeta', 'cuenta', 'cheque'].includes(type)) {
     throw new Error('Selecciona un tipo de medio de pago valido.');
   }
-  if (amount <= 0 || amount > 999999999.99) {
+  if (amount <= 0) {
     throw new Error('Ingresa un monto de garantia mayor a cero.');
+  }
+  if (amount > MAX_GUARANTEE_AMOUNT) {
+    throw new Error(`El monto de garantia no puede superar ${formatMoney(MAX_GUARANTEE_AMOUNT)}.`);
   }
 
   const sanitized = { ...payload, type, amount };
@@ -3122,26 +3197,11 @@ function fromSaleRequestInput(payload) {
 function sanitizeLotSubmission(payload) {
   requireFields(payload, [
     ['title', 'Ingresa el nombre del lote o producto.'],
-    ['itemType', 'Ingresa el tipo de lote o categoria principal.'],
-    ['quantity', 'Ingresa la cantidad de productos o piezas.'],
-    ['description', 'Describe la venta que queres subastar.'],
-    ['condition', 'Indica el estado de conservacion.'],
-    ['history', 'Agrega la historia o datos relevantes del bien.'],
     ['legalOrigin', 'Indica como podes acreditar el origen licito.'],
     ['payoutBank', 'Ingresa el banco de la cuenta de cobro.'],
     ['payoutAccountHolder', 'Ingresa el titular de la cuenta de cobro.'],
     ['payoutReference', 'Ingresa CBU, CVU, IBAN o alias de cobro.']
   ]);
-
-  const photoUris = Array.isArray(payload.photoUris)
-    ? payload.photoUris.map((uri) => sanitizeUri(uri, 'Revisa las fotos del lote.'))
-    : [];
-  if (photoUris.length < 6) {
-    throw new Error('Carga al menos 6 fotos del bien o lote.');
-  }
-  if (photoUris.length > 10) {
-    throw new Error('Carga hasta 10 fotos por solicitud.');
-  }
 
   if (!toBoolean(payload.ownershipDeclaration)) {
     throw new Error('Debes declarar que el bien te pertenece y no tiene impedimentos.');
@@ -3150,38 +3210,66 @@ function sanitizeLotSubmission(payload) {
     throw new Error('Debes aceptar la devolucion con cargo si la empresa no acepta el bien.');
   }
 
-  const quantity = parseQuantity(payload.quantity);
-  const lotKind = normalizeLotKind(payload.lotKind);
-  const composition = normalizeWhitespace(payload.composition);
-  if (lotKind === 'variado' && composition.length < 10) {
-    throw new Error('Detalla que productos distintos componen el lote variado.');
+  const rawItems = Array.isArray(payload.items) && payload.items.length ? payload.items : [payload];
+  if (rawItems.length > 20) {
+    throw new Error('Carga hasta 20 productos por lote.');
   }
-  if (composition.length > 1600) {
-    throw new Error('Resume la composicion del lote.');
-  }
-  const estimatedValue = payload.estimatedValue
-    ? parseMoney(payload.estimatedValue, 'Ingresa un valor estimado valido.')
-    : 0;
-  if (estimatedValue > 999999999.99) {
-    throw new Error('Ingresa un valor estimado menor.');
-  }
+  const items = rawItems.map((item, index) => sanitizeLotItem(item, index + 1));
+  const quantity = items.reduce((total, item) => total + item.quantity, 0);
+  const estimatedValue = items.reduce((total, item) => total + item.estimatedValue, 0);
+  const composition = items.map((item) => item.title).join(', ');
+  const firstItem = items[0];
 
   return {
     title: normalizeLotText(payload.title, 'Ingresa un nombre de lote valido.', 180),
-    lotKind,
-    itemType: normalizeLotText(payload.itemType, 'Ingresa un tipo de bien valido.', 120),
+    lotKind: items.length > 1 ? 'variado' : 'unico',
+    itemType: firstItem.itemType,
     quantity,
     estimatedValue,
     composition,
-    description: normalizeLotText(payload.description, 'Describe el bien con mas detalle.', 1200, 20),
-    condition: normalizeLotText(payload.condition, 'Indica el estado de conservacion con mas detalle.', 800, 10),
-    history: normalizeLotText(payload.history, 'Agrega historia, procedencia o datos relevantes.', 1600, 10),
+    description: firstItem.description,
+    condition: firstItem.condition,
+    history: firstItem.history,
     legalOrigin: normalizeLotText(payload.legalOrigin, 'Indica como podes acreditar el origen licito.', 1200, 10),
     payoutAccount: {
       accountHolder: normalizePersonName(payload.payoutAccountHolder, 'Ingresa un titular de cuenta valido.'),
       bank: normalizeLotText(payload.payoutBank, 'Ingresa un banco valido.', 120),
       reference: normalizeLotText(payload.payoutReference, 'Ingresa CBU, CVU, IBAN o alias valido.', 80)
     },
+    photoUris: items.flatMap((item) => item.photoUris),
+    items
+  };
+}
+
+function sanitizeLotItem(item, order) {
+  const photoUris = Array.isArray(item.photoUris)
+    ? item.photoUris.map((uri) => sanitizeUri(uri, `Revisa las fotos del producto ${order}.`))
+    : Array.isArray(item.uploadIds)
+      ? item.uploadIds.map((uri) => sanitizeUri(uri, `Revisa las fotos del producto ${order}.`))
+      : [];
+  if (photoUris.length < 6) {
+    throw new Error(`Carga al menos 6 fotos para el producto ${order}.`);
+  }
+  if (photoUris.length > 10) {
+    throw new Error(`Carga hasta 10 fotos para el producto ${order}.`);
+  }
+
+  const estimatedValue = item.estimatedValue
+    ? parseMoney(item.estimatedValue, `Ingresa un valor estimado valido para el producto ${order}.`)
+    : 0;
+  if (estimatedValue > 999999999.99) {
+    throw new Error(`Ingresa un valor estimado menor para el producto ${order}.`);
+  }
+
+  return {
+    order,
+    title: normalizeLotText(item.title ?? item.nombreBien, `Ingresa un nombre valido para el producto ${order}.`, 180),
+    itemType: normalizeLotText(item.itemType ?? item.tipoBien, `Ingresa una categoria valida para el producto ${order}.`, 120),
+    quantity: parseQuantity(item.quantity ?? item.cantidad ?? 1),
+    estimatedValue,
+    description: normalizeLotText(item.description ?? item.descripcion, `Describe mejor el producto ${order}.`, 1200, 20),
+    condition: normalizeLotText(item.condition ?? item.estadoConservacion, `Indica el estado del producto ${order}.`, 800, 10),
+    history: normalizeLotText(item.history ?? item.historia, `Agrega datos relevantes del producto ${order}.`, 1600, 10),
     photoUris
   };
 }
