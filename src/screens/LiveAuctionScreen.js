@@ -102,7 +102,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
       } catch (pollError) {
         setError(pollError.message);
       }
-    }, 5000);
+    }, 2000);
 
     return () => clearInterval(poll);
   }, [auctionId, user.clienteId]);
@@ -234,6 +234,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
     : 'Pujar';
   const finalized = auction.status === 'cerrada' || auction.closureStatus === 'finalizada';
   const counting = auction.closureStatus === 'en_cuenta' && !finalized;
+  const waitingForFirstBid = auction.closureStatus === 'esperando_puja' && !finalized && secondsRemaining > 0;
   const bidDisabled = sending || finalized || !selectedPaymentId || leadingActive;
 
   return (
@@ -280,9 +281,11 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
           </View>
 
           <View style={styles.stageCopy}>
-            <Text style={styles.stageMeta}>Lote actual</Text>
+            <Text style={styles.stageMeta}>
+              Objeto {auction.lotPosition || 1} de {auction.lotItemCount || 1}
+            </Text>
             <Text numberOfLines={2} style={styles.stageTitle}>
-              {auction.title}
+              {auction.itemTitle || auction.title}
             </Text>
             <Text numberOfLines={2} style={styles.stageDescription}>
               {auction.description}
@@ -301,10 +304,20 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
             />
             <View style={styles.timerCopy}>
               <Text style={styles.timerLabel}>
-                {finalized ? 'Lote adjudicado' : counting ? 'Cierra si nadie mejora en' : 'Cuenta por iniciar'}
+                {finalized
+                  ? 'Lote finalizado'
+                  : counting
+                    ? 'Cierra si nadie mejora en'
+                    : waitingForFirstBid
+                      ? 'Primera oferta antes de'
+                      : 'Esperando el siguiente lote'}
               </Text>
               <Text style={[styles.timerValue, finalized && styles.timerValueClosed]}>
-                {finalized ? getClosureCopy(auction) : counting ? formatCountdown(secondsRemaining) : 'Al pujar'}
+                {finalized
+                  ? getClosureCopy(auction)
+                  : counting || waitingForFirstBid
+                    ? formatCountdown(secondsRemaining)
+                    : 'Preparando sala'}
               </Text>
             </View>
           </View>
@@ -482,13 +495,13 @@ function formatCountdown(seconds) {
 }
 
 function getClosureCopy(auction) {
-  if (auction.closure?.reason === 'compra_empresa_sin_pujas') return 'Compra empresa';
+  if (auction.closure?.reason === 'sin_ofertas') return 'Sin ofertas';
   return auction.closure?.winner?.bidderAlias ?? 'Finalizada';
 }
 
 function getFinalResultText(auction) {
-  if (auction.closure?.reason === 'compra_empresa_sin_pujas') {
-    return `Nadie mejoro la oferta. La empresa compra el lote por el valor base de ${formatMoney(auction.basePrice)}.`;
+  if (auction.closure?.reason === 'sin_ofertas') {
+    return 'No se recibieron ofertas para este objeto dentro del plazo establecido.';
   }
   if (auction.closure?.winner?.isCurrentUser) {
     const amount = auction.closure.winner.amount;

@@ -187,10 +187,10 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
               </Pressable>
             )}
           </View>
-          <Text style={styles.title}>{auction.title}</Text>
+          <Text style={styles.title}>{auction.itemTitle || auction.title}</Text>
           <Text style={styles.description}>{auction.fullDescription}</Text>
 
-          <View style={styles.catalogCard}>
+          {auction.status !== 'abierta' ? <View style={styles.catalogCard}>
             <View style={styles.catalogHeader}>
               <MaterialCommunityIcons color={colors.primary} name="format-list-bulleted" size={19} />
               <Text style={styles.catalogTitle}>Catalogo de productos</Text>
@@ -207,7 +207,7 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
                 </View>
               </View>
             ))}
-          </View>
+          </View> : null}
 
           <View style={styles.infoGrid}>
             <InfoBlock label="Base" value={formatMoney(auction.basePrice)} />

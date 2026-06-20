@@ -12,7 +12,7 @@ require('dotenv').config();
 const app = express();
 const SESSION_DAYS = 7;
 const BID_TIMER_SECONDS = 60;
-const COMPANY_CLIENT_ID = 4;
+const FIRST_BID_TIMER_SECONDS = 3 * 60;
 const SHIPPING_COST = 25000;
 const MAX_BID_LIMIT_CATEGORIES = new Set(['bronce', 'comun', 'plata']);
 const categoryRank = { comun: 1, especial: 2, plata: 3, oro: 4, platino: 5 };
@@ -1410,11 +1410,15 @@ async function getAuctionRows(viewer = null) {
      FROM subastas s
      JOIN catalogos c ON c.subasta = s.identificador
      JOIN (
-       SELECT catalogo, MIN(identificador) AS item_id
+       SELECT catalogo,
+         COALESCE(
+           MIN(CASE WHEN cierre_estado <> 'finalizada' THEN orden_lote END),
+           MAX(orden_lote)
+         ) AS orden_actual
        FROM items_catalogo
        GROUP BY catalogo
-     ) catalogo_principal ON catalogo_principal.catalogo = c.identificador
-     JOIN items_catalogo i ON i.identificador = catalogo_principal.item_id
+     ) catalogo_actual ON catalogo_actual.catalogo = c.identificador
+     JOIN items_catalogo i ON i.catalogo = c.identificador AND i.orden_lote = catalogo_actual.orden_actual
      JOIN productos p ON p.identificador = i.producto
      ${restrictedCatalog ? "WHERE s.estado = 'programada'" : ''}
      ORDER BY CASE s.estado WHEN 'abierta' THEN 0 WHEN 'programada' THEN 1 ELSE 2 END, s.fecha ASC`
@@ -1425,16 +1429,19 @@ async function getAuctionRows(viewer = null) {
 
 async function getAuctionDetail(auctionId, clienteId) {
   await settleExpiredAuctionTimers();
+  await ensureActiveAuctionItem(auctionId);
   const viewer = await getViewer(clienteId);
   const restrictedCatalog = !viewer || viewer.rol === 'invitado';
   const auction = await first(
-    `SELECT s.identificador AS id, s.titulo AS title, DATE_FORMAT(s.fecha, '%Y-%m-%d') AS date,
+    `SELECT s.identificador AS id, s.titulo AS title, s.titulo AS auctionTitle, DATE_FORMAT(s.fecha, '%Y-%m-%d') AS date,
       s.hora AS time, s.estado AS status, s.categoria AS category, s.moneda AS currency,
       s.ubicacion AS location, s.capacidad_asistentes AS capacity,
       COALESCE(p.imagen_uri, s.imagen_uri) AS imageUrl, p.descripcion_catalogo AS description,
-      p.descripcion_completa AS fullDescription, p.identificador AS productId,
+      p.descripcion_catalogo AS itemTitle, p.descripcion_completa AS fullDescription, p.identificador AS productId,
       i.identificador AS itemId, i.precio_base AS basePrice, i.comision AS commission,
       i.puja_actual AS currentBid, i.subastado AS sold,
+      i.orden_lote AS lotPosition,
+      (SELECT COUNT(*) FROM items_catalogo lot_items WHERE lot_items.catalogo = c.identificador) AS lotItemCount,
       i.timer_inicio AS timerStartedAt, i.timer_vencimiento AS timerExpiresAt,
       i.cierre_estado AS closureStatus, i.cierre_motivo AS closureReason,
       GREATEST(0, TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), i.timer_vencimiento)) AS timerSecondsRemaining,
@@ -1446,6 +1453,8 @@ async function getAuctionDetail(auctionId, clienteId) {
      JOIN items_catalogo i ON i.catalogo = c.identificador
      JOIN productos p ON p.identificador = i.producto
      WHERE s.identificador = ?
+     ORDER BY CASE WHEN i.cierre_estado = 'finalizada' THEN 1 ELSE 0 END,
+       CASE WHEN i.cierre_estado = 'finalizada' THEN -i.orden_lote ELSE i.orden_lote END ASC
      LIMIT 1`,
     [auctionId]
   );
@@ -1483,14 +1492,14 @@ async function getAuctionCatalogLots(auctionId, viewer = null) {
       p.descripcion_catalogo AS description, p.descripcion_completa AS fullDescription,
       p.identificador AS productId, p.imagen_uri AS imageUrl,
       i.identificador AS itemId, i.precio_base AS basePrice, i.puja_actual AS currentBid,
-      i.comision AS commission, i.subastado AS sold, i.cierre_estado AS closureStatus,
+      i.orden_lote AS lotPosition, i.comision AS commission, i.subastado AS sold, i.cierre_estado AS closureStatus,
       i.timer_inicio AS timerStartedAt, i.timer_vencimiento AS timerExpiresAt
      FROM subastas s
      JOIN catalogos c ON c.subasta = s.identificador
      JOIN items_catalogo i ON i.catalogo = c.identificador
      JOIN productos p ON p.identificador = i.producto
      WHERE s.identificador = ?
-     ORDER BY i.identificador ASC`,
+     ORDER BY i.orden_lote ASC, i.identificador ASC`,
     [auctionId]
   );
 
@@ -1617,14 +1626,57 @@ async function getActiveLeadingBid(clienteId) {
   );
 }
 
+async function ensureActiveAuctionItem(auctionId) {
+  const auction = await first(
+    'SELECT identificador AS id, estado AS status FROM subastas WHERE identificador = ? LIMIT 1',
+    [auctionId]
+  );
+  if (!auction || auction.status !== 'abierta') return null;
+
+  const item = await first(
+    `SELECT identificador AS itemId, timer_vencimiento AS timerExpiresAt
+     FROM items_catalogo
+     WHERE catalogo = (SELECT identificador FROM catalogos WHERE subasta = ? LIMIT 1)
+       AND cierre_estado <> 'finalizada'
+     ORDER BY orden_lote ASC, identificador ASC
+     LIMIT 1`,
+    [auctionId]
+  );
+
+  if (!item) {
+    await run('UPDATE subastas SET estado = ? WHERE identificador = ? AND estado = ?', ['cerrada', auctionId, 'abierta']);
+    return null;
+  }
+
+  if (!item.timerExpiresAt) {
+    await run(
+      `UPDATE items_catalogo
+       SET timer_inicio = UTC_TIMESTAMP(), timer_vencimiento = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND),
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ? AND cierre_estado <> 'finalizada' AND timer_vencimiento IS NULL`,
+      [FIRST_BID_TIMER_SECONDS, item.itemId]
+    );
+  }
+
+  return item.itemId;
+}
+
+async function ensureOpenAuctionItems() {
+  const auctions = await query("SELECT identificador AS id FROM subastas WHERE estado = 'abierta'");
+  for (const auction of auctions) {
+    await ensureActiveAuctionItem(auction.id);
+  }
+}
+
 async function settleExpiredAuctionTimers() {
+  await ensureOpenAuctionItems();
   const rows = await query(
     `SELECT i.identificador AS itemId
      FROM items_catalogo i
      JOIN catalogos c ON c.identificador = i.catalogo
      JOIN subastas s ON s.identificador = c.subasta
      WHERE s.estado = 'abierta'
-       AND i.cierre_estado = 'en_cuenta'
+       AND i.cierre_estado IN ('esperando_puja', 'en_cuenta')
        AND i.timer_vencimiento IS NOT NULL
        AND i.timer_vencimiento <= UTC_TIMESTAMP()
      ORDER BY i.timer_vencimiento ASC
@@ -1661,39 +1713,41 @@ async function finalizeAuctionItem(itemId) {
     [itemId]
   );
 
-  const buyerClientId = lastBid?.clienteId ?? COMPANY_CLIENT_ID;
-  const amount = Number(lastBid?.amount ?? item.basePrice);
+  const buyerClientId = lastBid?.clienteId ?? null;
+  const amount = Number(lastBid?.amount ?? 0);
   const paymentMethodId = lastBid?.paymentMethodId ?? null;
-  const reason = lastBid ? 'adjudicada_por_tiempo' : 'compra_empresa_sin_pujas';
+  const reason = lastBid ? 'adjudicada_por_tiempo' : 'sin_ofertas';
 
   if (lastBid) {
     await run('UPDATE pujos SET ganador = ? WHERE item = ?', ['no', itemId]);
     await run('UPDATE pujos SET ganador = ? WHERE identificador = ?', ['si', lastBid.bidId]);
   }
 
-  const receipt = await first(
-    `SELECT identificador AS id
-     FROM registro_de_subasta
-     WHERE subasta = ? AND producto = ?
-     LIMIT 1`,
-    [item.auctionId, item.productId]
-  );
-
-  if (!receipt) {
-    await run(
-      `INSERT INTO registro_de_subasta (subasta, duenio, producto, cliente, medio_pago, importe, comision, estado_pago)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [item.auctionId, item.ownerId, item.productId, buyerClientId, paymentMethodId, amount, item.commission, 'pendiente']
+  if (lastBid) {
+    const receipt = await first(
+      `SELECT identificador AS id
+       FROM registro_de_subasta
+       WHERE subasta = ? AND producto = ?
+       LIMIT 1`,
+      [item.auctionId, item.productId]
     );
+
+    if (!receipt) {
+      await run(
+        `INSERT INTO registro_de_subasta (subasta, duenio, producto, cliente, medio_pago, importe, comision, estado_pago)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [item.auctionId, item.ownerId, item.productId, buyerClientId, paymentMethodId, amount, item.commission, 'pendiente']
+      );
+    }
   }
 
   await run(
     `UPDATE items_catalogo
-     SET subastado = 'si', cierre_estado = 'finalizada', cierre_motivo = ?
+     SET subastado = ?, cierre_estado = 'finalizada', cierre_motivo = ?
      WHERE identificador = ?`,
-    [reason, itemId]
+    [lastBid ? 'si' : 'no', reason, itemId]
   );
-  await run('UPDATE subastas SET estado = ? WHERE identificador = ?', ['cerrada', item.auctionId]);
+  await ensureActiveAuctionItem(item.auctionId);
 
   if (lastBid) {
     await refreshClientCategory(buyerClientId);
@@ -2412,7 +2466,7 @@ function bearerToken(req) {
 }
 
 async function sendVerificationForUser({ email, name, token }) {
-  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 6000);
+  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 20000);
   const sendPromise = sendVerificationEmail({ to: email, name, token }).catch((error) => {
     console.warn(`No se pudo enviar verificacion a ${email}: ${error.message}`);
     return { sent: false, skipped: false, reason: 'send_failed' };
@@ -2432,7 +2486,7 @@ async function sendVerificationForUser({ email, name, token }) {
 }
 
 async function sendAccountReviewForUser({ accepted = true, email, name }) {
-  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 6000);
+  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 20000);
   const sendPromise = sendAccountReviewEmail({ accepted, to: email, name }).catch((error) => {
     console.warn(`No se pudo enviar validacion de cuenta a ${email}: ${error.message}`);
     return { sent: false, skipped: false, reason: 'send_failed' };
@@ -2452,7 +2506,7 @@ async function sendAccountReviewForUser({ accepted = true, email, name }) {
 }
 
 async function sendPasswordResetForUser({ email, name, token }) {
-  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 6000);
+  const timeoutMs = Number(process.env.MAIL_RESPONSE_TIMEOUT_MS || 20000);
   const sendPromise = sendPasswordResetEmail({ to: email, name, token }).catch((error) => {
     console.warn(`No se pudo enviar recuperacion a ${email}: ${error.message}`);
     return { sent: false, skipped: false, reason: 'send_failed' };
@@ -3237,7 +3291,7 @@ async function start() {
     settleExpiredAuctionTimers().catch((error) => {
       console.warn(`No se pudo cerrar subastas vencidas: ${error.message}`);
     });
-  }, 5000);
+  }, 1000);
   app.listen(port, '0.0.0.0', () => {
     console.log(`EliteBid API escuchando en http://0.0.0.0:${port}/api`);
   });

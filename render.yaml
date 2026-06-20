@@ -36,7 +36,9 @@ services:
       - key: SMTP_SECURE
         value: "true"
       - key: SMTP_TIMEOUT_MS
-        value: "15000"
+        value: "20000"
+      - key: MAIL_RESPONSE_TIMEOUT_MS
+        value: "20000"
       - key: MAIL_USER
         sync: false
       - key: MAIL_PASSWORD

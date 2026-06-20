@@ -89,6 +89,8 @@ RESEND_FROM=EliteBid <onboarding@resend.dev>
 
 Si no hay SMTP ni `RESEND_API_KEY`, el registro no falla: el backend deja la cuenta pendiente y muestra el codigo en consola para pruebas locales. Para reenviar el mail se puede llamar:
 
+En Render, las variables de correo se cargan en el servicio backend en **Environment**; el archivo `.env` de la PC no se publica. Configura `MAIL_USER` y `MAIL_PASSWORD` como secretos junto con los valores SMTP anteriores.
+
 ```bash
 curl -X POST http://127.0.0.1:3001/api/auth/resend-verification -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\"}"
 ```

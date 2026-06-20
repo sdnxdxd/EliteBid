@@ -54,9 +54,9 @@ async function sendMail({ to, subject, content, fallbackLog }) {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASSWORD
       },
-      connectionTimeout: Number(process.env.SMTP_TIMEOUT_MS || 15000),
-      greetingTimeout: Number(process.env.SMTP_TIMEOUT_MS || 15000),
-      socketTimeout: Number(process.env.SMTP_TIMEOUT_MS || 15000)
+      connectionTimeout: Number(process.env.SMTP_TIMEOUT_MS || 20000),
+      greetingTimeout: Number(process.env.SMTP_TIMEOUT_MS || 20000),
+      socketTimeout: Number(process.env.SMTP_TIMEOUT_MS || 20000)
     });
 
     const info = await transporter.sendMail({

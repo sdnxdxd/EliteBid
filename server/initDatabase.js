@@ -19,6 +19,18 @@ async function initDatabase() {
   await getPool().query(schema);
   await migrateSecuritySchema();
   await seedDatabase();
+  await normalizeUnstartedLotItems();
+}
+
+async function normalizeUnstartedLotItems() {
+  await run(
+    `UPDATE items_catalogo i
+     LEFT JOIN pujos p ON p.item = i.identificador
+     SET i.puja_actual = 0
+     WHERE p.identificador IS NULL
+       AND i.cierre_estado = 'esperando_puja'
+       AND i.timer_vencimiento IS NULL`
+  );
 }
 
 async function migrateSecuritySchema() {
@@ -74,6 +86,26 @@ async function migrateSecuritySchema() {
     'password_reset_expires_at',
     'ALTER TABLE usuarios ADD COLUMN password_reset_expires_at DATETIME'
   );
+  await addColumnIfMissing(
+    'items_catalogo',
+    'orden_lote',
+    'ALTER TABLE items_catalogo ADD COLUMN orden_lote INT NOT NULL DEFAULT 0 AFTER catalogo'
+  );
+  const catalogItems = await query(
+    'SELECT identificador AS id, catalogo AS catalogId, orden_lote AS lotOrder FROM items_catalogo ORDER BY catalogo ASC, identificador ASC'
+  );
+  let currentCatalogId = null;
+  let lotOrder = 0;
+  for (const item of catalogItems) {
+    if (Number(item.catalogId) !== Number(currentCatalogId)) {
+      currentCatalogId = item.catalogId;
+      lotOrder = 0;
+    }
+    lotOrder += 1;
+    if (!Number(item.lotOrder)) {
+      await run('UPDATE items_catalogo SET orden_lote = ? WHERE identificador = ?', [lotOrder, item.id]);
+    }
+  }
   await addColumnIfMissing(
     'items_catalogo',
     'timer_inicio',
@@ -361,22 +393,6 @@ async function seedAuction(auction) {
     ]
   );
   await run(
-    `UPDATE subastas
-     SET titulo = ?, fecha = ?, hora = ?, estado = ?, ubicacion = ?, categoria = ?, moneda = ?, imagen_uri = ?
-     WHERE identificador = ?`,
-    [
-      auction.title,
-      auction.date,
-      auction.time,
-      auction.status,
-      auction.location,
-      auction.category,
-      'ARS',
-      auction.image,
-      auction.id
-    ]
-  );
-  await run(
     `INSERT IGNORE INTO productos (identificador, fecha, disponible, descripcion_catalogo, descripcion_completa, revisor, duenio, seguro, imagen_uri)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [auction.id, auction.date, 'si', auction.product, auction.product, 2, 3, null, auction.image]
@@ -387,20 +403,27 @@ async function seedAuction(auction) {
     [auction.id, `Catalogo ${auction.title}`, auction.id, 2]
   );
   await run(
-    `INSERT IGNORE INTO items_catalogo (identificador, catalogo, producto, precio_base, comision, subastado, puja_actual)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [auction.id, auction.id, auction.id, auction.basePrice, auction.basePrice * 0.12, 'no', auction.currentBid]
-  );
-  await run(
-    `UPDATE items_catalogo
-     SET precio_base = ?, comision = ?, subastado = 'no', puja_actual = ?,
-       timer_inicio = NULL, timer_vencimiento = NULL,
-       cierre_estado = 'esperando_puja', cierre_motivo = NULL
-     WHERE identificador = ?`,
-    [auction.basePrice, auction.basePrice * 0.12, auction.currentBid, auction.id]
+    `INSERT IGNORE INTO items_catalogo (identificador, catalogo, orden_lote, producto, precio_base, comision, subastado, puja_actual)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [auction.id, auction.id, 1, auction.id, auction.basePrice, auction.basePrice * 0.12, 'no', 0]
   );
 
-  for (const [index, item] of (auction.extraItems || []).entries()) {
+  const additionalLotItems = auction.extraItems?.length
+    ? auction.extraItems
+    : [
+        {
+          product: `${auction.title}: pieza complementaria I.`,
+          image: auction.image,
+          basePrice: Math.max(1, Math.round(auction.basePrice * 0.6))
+        },
+        {
+          product: `${auction.title}: pieza complementaria II.`,
+          image: auction.image,
+          basePrice: Math.max(1, Math.round(auction.basePrice * 0.35))
+        }
+      ];
+
+  for (const [index, item] of additionalLotItems.entries()) {
     const productId = auction.id * 100 + index + 1;
     const itemId = auction.id * 100 + index + 1;
     await run(
@@ -409,17 +432,9 @@ async function seedAuction(auction) {
       [productId, auction.date, 'si', item.product, item.product, 2, 3, null, item.image || auction.image]
     );
     await run(
-      `INSERT IGNORE INTO items_catalogo (identificador, catalogo, producto, precio_base, comision, subastado, puja_actual)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [itemId, auction.id, productId, item.basePrice, item.basePrice * 0.12, 'no', item.currentBid || 0]
-    );
-    await run(
-      `UPDATE items_catalogo
-       SET precio_base = ?, comision = ?, subastado = 'no', puja_actual = ?,
-         timer_inicio = NULL, timer_vencimiento = NULL,
-         cierre_estado = 'esperando_puja', cierre_motivo = NULL
-       WHERE identificador = ?`,
-      [item.basePrice, item.basePrice * 0.12, item.currentBid || 0, itemId]
+      `INSERT IGNORE INTO items_catalogo (identificador, catalogo, orden_lote, producto, precio_base, comision, subastado, puja_actual)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [itemId, auction.id, index + 2, productId, item.basePrice, item.basePrice * 0.12, 'no', item.currentBid || 0]
     );
   }
 }

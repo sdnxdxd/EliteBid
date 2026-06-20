@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS catalogos (
 CREATE TABLE IF NOT EXISTS items_catalogo (
   identificador INT AUTO_INCREMENT PRIMARY KEY,
   catalogo INT NOT NULL,
+  orden_lote INT NOT NULL DEFAULT 0,
   producto INT NOT NULL,
   precio_base DECIMAL(14,2) NOT NULL,
   comision DECIMAL(14,2) NOT NULL,
