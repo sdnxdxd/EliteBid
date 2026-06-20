@@ -83,6 +83,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+  const [expandedItemIndex, setExpandedItemIndex] = useState(0);
 
   async function loadLots() {
     setLoading(true);
@@ -143,6 +144,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
   }
 
   function addItem() {
+    setExpandedItemIndex(form.items.length);
     setForm((current) => ({ ...current, items: [...current.items, createEmptyProduct()] }));
   }
 
@@ -151,6 +153,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
       ...current,
       items: current.items.length > 1 ? current.items.filter((_, itemIndex) => itemIndex !== index) : current.items
     }));
+    setExpandedItemIndex((current) => Math.max(0, index < current ? current - 1 : current));
   }
 
   async function pickPhoto(itemIndex, source) {
@@ -232,12 +235,17 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
         ['history', `Agrega datos relevantes del producto ${productNumber}.`]
       ];
       for (const [key, message] of requiredItemFields) {
-        if (!String(item[key] ?? '').trim()) return message;
+        if (!String(item[key] ?? '').trim()) {
+          setExpandedItemIndex(index);
+          return message;
+        }
       }
       if (Number(item.quantity) < 1 || Number(item.quantity) > 999) {
+        setExpandedItemIndex(index);
         return `Ingresa una cantidad de piezas valida para el producto ${productNumber}.`;
       }
       if (item.photoUris.length < 6) {
+        setExpandedItemIndex(index);
         return `Carga al menos 6 fotos para el producto ${productNumber}.`;
       }
     }
@@ -269,6 +277,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
       });
       setLots(rows);
       setForm(createInitialForm());
+      setExpandedItemIndex(0);
       setActiveView('status');
       setToast({ message: 'Lote cargado. Quedo pendiente de habilitacion.', tone: 'success' });
     } catch (error) {
@@ -301,18 +310,24 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
-          <Text style={styles.title}>Ventas para subastar</Text>
-          <Text style={styles.subtitle}>
-            Armá un lote: cada producto lleva su propia ficha, descripción y fotos.
-          </Text>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <SummaryBlock label="Pendientes" value={totals.pending} />
-          <SummaryBlock label="Revision" value={totals.review} />
-          <SummaryBlock label="Aceptados" value={totals.accepted} />
-        </View>
+        {activeView === 'form' ? (
+          <View style={styles.formHero}>
+            <Text style={styles.formHeroTitle}>Nuevo lote</Text>
+            <Text style={styles.formHeroText}>Completá una ficha por artículo. Podés sumar otro cuando termines.</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.hero}>
+              <Text style={styles.title}>Ventas para subastar</Text>
+              <Text style={styles.subtitle}>Seguí el estado de los lotes que enviaste a revisión.</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <SummaryBlock label="Pendientes" value={totals.pending} />
+              <SummaryBlock label="Revision" value={totals.review} />
+              <SummaryBlock label="Aceptados" value={totals.accepted} />
+            </View>
+          </>
+        )}
 
         <View style={styles.switcher}>
           <ModeButton active={activeView === 'form'} icon="plus-box" label="Cargar" onPress={() => setActiveView('form')} />
@@ -322,11 +337,13 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
         {activeView === 'form' ? (
           <LotForm
             form={form}
+            expandedItemIndex={expandedItemIndex}
             onAddItem={addItem}
             onPickPhoto={pickPhoto}
             onRemoveItem={removeItem}
             onRemovePhoto={removePhoto}
             onSubmit={submitLot}
+            onToggleItem={setExpandedItemIndex}
             submitting={submitting}
             updateField={updateField}
             updateItem={updateItem}
@@ -348,7 +365,7 @@ export default function PurchasesScreen({ onBack, onNavigate, user }) {
   );
 }
 
-function LotForm({ form, onAddItem, onPickPhoto, onRemoveItem, onRemovePhoto, onSubmit, submitting, updateField, updateItem }) {
+function LotForm({ expandedItemIndex, form, onAddItem, onPickPhoto, onRemoveItem, onRemovePhoto, onSubmit, onToggleItem, submitting, updateField, updateItem }) {
   return (
     <View style={styles.form}>
       <SectionHeader icon="package-variant" title="Datos del lote" />
@@ -363,12 +380,14 @@ function LotForm({ form, onAddItem, onPickPhoto, onRemoveItem, onRemovePhoto, on
       {form.items.map((item, index) => (
         <ProductForm
           canRemove={form.items.length > 1}
+          expanded={expandedItemIndex === index}
           index={index}
           item={item}
           key={`product-${index}`}
           onPickPhoto={onPickPhoto}
           onRemove={() => onRemoveItem(index)}
           onRemovePhoto={onRemovePhoto}
+          onToggle={() => onToggleItem(expandedItemIndex === index ? -1 : index)}
           updateItem={updateItem}
         />
       ))}
@@ -429,20 +448,28 @@ function LotForm({ form, onAddItem, onPickPhoto, onRemoveItem, onRemovePhoto, on
   );
 }
 
-function ProductForm({ canRemove, index, item, onPickPhoto, onRemove, onRemovePhoto, updateItem }) {
+function ProductForm({ canRemove, expanded, index, item, onPickPhoto, onRemove, onRemovePhoto, onToggle, updateItem }) {
   return (
     <View style={styles.productCard}>
       <View style={styles.productHeader}>
-        <View>
-          <Text style={styles.productEyebrow}>Artículo {index + 1}</Text>
-          <Text style={styles.productTitle}>Ficha individual del producto</Text>
-        </View>
+        <Pressable onPress={onToggle} style={styles.productSummary}>
+          <View style={styles.productIndex}>
+            <Text style={styles.productIndexText}>{index + 1}</Text>
+          </View>
+          <View style={styles.productSummaryText}>
+            <Text style={styles.productEyebrow}>Artículo {index + 1}</Text>
+            <Text numberOfLines={1} style={styles.productTitle}>{item.title || 'Ficha individual del producto'}</Text>
+            {!expanded ? <Text style={styles.productMeta}>{item.photoUris.length}/6 fotos · {item.itemType || 'Categoría pendiente'}</Text> : null}
+          </View>
+          <MaterialCommunityIcons color={colors.primary} name={expanded ? 'chevron-up' : 'chevron-down'} size={24} />
+        </Pressable>
         {canRemove ? (
           <Pressable onPress={onRemove} style={styles.removeProductButton}>
             <MaterialCommunityIcons color={colors.error} name="trash-can-outline" size={20} />
           </Pressable>
         ) : null}
       </View>
+      {!expanded ? null : <>
       <Field label="Nombre del producto" onChangeText={(value) => updateItem(index, 'title', value)} value={item.title} />
       <Field label="Categoria" onChangeText={(value) => updateItem(index, 'itemType', value)} value={item.itemType} />
       <Field
@@ -507,6 +534,7 @@ function ProductForm({ canRemove, index, item, onPickPhoto, onRemove, onRemovePh
           </View>
         ))}
       </View>
+      </>}
     </View>
   );
 }
@@ -753,7 +781,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 18,
-    paddingBottom: bottomNavHeight + 34,
+    paddingBottom: bottomNavHeight + 72,
     paddingTop: 18
   },
   disabled: {
@@ -801,6 +829,26 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     minWidth: 0
   },
+  formHero: {
+    backgroundColor: 'rgba(168, 139, 250, 0.08)',
+    borderColor: 'rgba(168, 139, 250, 0.22)',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 15
+  },
+  formHeroText: {
+    color: colors.onSurfaceVariant,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 4
+  },
+  formHeroTitle: {
+    color: colors.onSurface,
+    fontSize: 19,
+    fontWeight: '900'
+  },
   form: {
     gap: 6
   },
@@ -823,12 +871,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 21,
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: 16,
     paddingVertical: 14
   },
   inputMultiline: {
-    minHeight: 128
+    minHeight: 96
   },
   kindButton: {
     alignItems: 'center',
@@ -1007,7 +1055,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16
+    marginBottom: 12
+  },
+  productIndex: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.full,
+    height: 32,
+    justifyContent: 'center',
+    width: 32
+  },
+  productIndexText: {
+    color: colors.onPrimaryFixed,
+    fontSize: 14,
+    fontWeight: '900'
+  },
+  productMeta: {
+    color: colors.onSurfaceVariant,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2
+  },
+  productSummary: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minWidth: 0,
+    paddingVertical: 2
+  },
+  productSummaryText: {
+    flex: 1,
+    minWidth: 0
   },
   productTitle: {
     color: colors.onSurface,
