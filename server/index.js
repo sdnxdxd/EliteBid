@@ -64,7 +64,7 @@ app.use(express.json({ limit: '30mb' }));
 app.get('/api/health', async (_req, res, next) => {
   try {
     await first('SELECT 1 AS ok');
-    res.json({ ok: true });
+    res.json({ ok: true, emailProviderConfigured: hasEmailProviderConfig() });
   } catch (error) {
     next(error);
   }
