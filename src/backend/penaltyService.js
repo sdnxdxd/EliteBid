@@ -9,3 +9,9 @@ export async function settlePenalty(clienteId, penaltyId) {
     method: 'POST'
   });
 }
+
+export async function presentPenaltyFunds(clienteId, penaltyId) {
+  return apiRequest(`/users/${clienteId}/penalties/${penaltyId}/funds`, {
+    method: 'POST'
+  });
+}

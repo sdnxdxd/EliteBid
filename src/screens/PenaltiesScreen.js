@@ -3,25 +3,34 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { getUserPenalties, settlePenalty } from '../backend/penaltyService';
+import { getUserPenalties, presentPenaltyFunds, settlePenalty } from '../backend/penaltyService';
 import AppToast from '../components/AppToast';
 import { colors, radii } from '../theme';
 
 export default function PenaltiesScreen({ onBack, user }) {
   const [penalties, setPenalties] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [settlingId, setSettlingId] = useState(null);
+  const [settlingKey, setSettlingKey] = useState(null);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
     let mounted = true;
 
     async function load() {
-      const rows = await getUserPenalties(user.clienteId);
+      try {
+        const rows = await getUserPenalties(user.clienteId);
 
-      if (mounted) {
-        setPenalties(rows);
-        setLoading(false);
+        if (mounted) {
+          setPenalties(rows);
+        }
+      } catch (error) {
+        if (mounted) {
+          setToast(error.message);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
     }
 
@@ -33,20 +42,22 @@ export default function PenaltiesScreen({ onBack, user }) {
   }, [user.clienteId]);
 
   async function handleSettle(penalty, mode) {
-    setSettlingId(penalty.id);
+    setSettlingKey(`${penalty.id}:${mode}`);
 
     try {
-      const rows = await settlePenalty(user.clienteId, penalty.id);
+      const rows = mode === 'funds'
+        ? await presentPenaltyFunds(user.clienteId, penalty.id)
+        : await settlePenalty(user.clienteId, penalty.id);
       setPenalties(rows);
       setToast(
         mode === 'pay'
-          ? 'Penalidad pagada. Tu cuenta queda actualizada.'
-          : 'Penalidad marcada como solucionada.'
+          ? 'Multa abonada. Si todavia no presentaste fondos, la restriccion sigue activa.'
+          : 'Fondos presentados. Tu cuenta queda actualizada.'
       );
     } catch (settleError) {
       setToast(settleError.message);
     } finally {
-      setSettlingId(null);
+      setSettlingKey(null);
     }
   }
 
@@ -87,7 +98,7 @@ export default function PenaltiesScreen({ onBack, user }) {
                   key={penalty.id}
                   onSettle={handleSettle}
                   penalty={penalty}
-                  settling={settlingId === penalty.id}
+                  settlingKey={settlingKey}
                 />
               ))}
             </View>
@@ -105,9 +116,14 @@ export default function PenaltiesScreen({ onBack, user }) {
   );
 }
 
-function PenaltyCard({ onSettle, penalty, settling }) {
+function PenaltyCard({ onSettle, penalty, settlingKey }) {
   const active = penalty.status === 'activa' || penalty.status === 'vencida';
-  const blocked = settling || !active;
+  const finePaid = Boolean(penalty.finePaidAt);
+  const fundsPresented = penalty.fundsPresented === 'si';
+  const payLoading = settlingKey === `${penalty.id}:pay`;
+  const fundsLoading = settlingKey === `${penalty.id}:funds`;
+  const payBlocked = Boolean(settlingKey) || !active || finePaid || penalty.status === 'vencida';
+  const fundsBlocked = Boolean(settlingKey) || !active || fundsPresented || penalty.status === 'vencida';
 
   return (
     <View style={[styles.card, active && styles.cardActive]}>
@@ -124,33 +140,59 @@ function PenaltyCard({ onSettle, penalty, settling }) {
           <Text style={styles.amount}>{formatMoney(penalty.amount)}</Text>
         </View>
         <Text style={styles.description}>{penalty.description}</Text>
+        {penalty.type === 'falta_fondos' ? (
+          <View style={styles.obligationList}>
+            <Obligation done={finePaid} text={`Multa ${finePaid ? 'abonada' : `pendiente: ${formatMoney(penalty.amount)}`}`} />
+            <Obligation
+              done={fundsPresented}
+              text={fundsPresented ? 'Fondos presentados' : `Presentar fondos: ${formatMoney(penalty.totalRequired)}`}
+            />
+          </View>
+        ) : null}
         <View style={styles.metaRow}>
           <Text style={[styles.status, active && styles.statusActive]}>{penalty.status}</Text>
-          <Text style={styles.dueDate}>Vence: {formatDate(penalty.dueDate)}</Text>
+          <Text style={styles.dueDate}>Vence: {formatDateTime(penalty.dueAt ?? penalty.dueDate)}</Text>
         </View>
         {active ? (
           <View style={styles.actionRow}>
             <Pressable
-              disabled={blocked}
+              disabled={payBlocked}
               onPress={() => onSettle?.(penalty, 'pay')}
-              style={[styles.primaryAction, blocked && styles.actionDisabled]}
+              style={[styles.primaryAction, payBlocked && styles.actionDisabled]}
             >
-              {settling ? (
+              {payLoading ? (
                 <ActivityIndicator color={colors.onPrimaryFixed} />
               ) : (
-                <Text style={styles.primaryActionText}>Pagar ahora</Text>
+                <Text style={styles.primaryActionText}>{finePaid ? 'Multa paga' : 'Pagar multa'}</Text>
               )}
             </Pressable>
             <Pressable
-              disabled={blocked}
-              onPress={() => onSettle?.(penalty, 'solve')}
-              style={[styles.secondaryAction, blocked && styles.actionDisabled]}
+              disabled={fundsBlocked}
+              onPress={() => onSettle?.(penalty, 'funds')}
+              style={[styles.secondaryAction, fundsBlocked && styles.actionDisabled]}
             >
-              <Text style={styles.secondaryActionText}>Solucionada</Text>
+              {fundsLoading ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={styles.secondaryActionText}>{fundsPresented ? 'Fondos OK' : 'Presentar fondos'}</Text>
+              )}
             </Pressable>
           </View>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+function Obligation({ done, text }) {
+  return (
+    <View style={styles.obligationRow}>
+      <MaterialCommunityIcons
+        color={done ? '#73E6A2' : colors.error}
+        name={done ? 'check-circle-outline' : 'clock-alert-outline'}
+        size={16}
+      />
+      <Text style={[styles.obligationText, done && styles.obligationDone]}>{text}</Text>
     </View>
   );
 }
@@ -161,14 +203,16 @@ function formatMoney(value) {
   })}`;
 }
 
-function formatDate(date) {
+function formatDateTime(date) {
   if (!date) return 'sin fecha';
 
   return new Intl.DateTimeFormat('es-AR', {
     day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
     month: 'short',
     year: 'numeric'
-  }).format(new Date(`${date}T12:00:00`));
+  }).format(new Date(String(date).includes(' ') ? date.replace(' ', 'T') : `${date}T12:00:00`));
 }
 
 const styles = StyleSheet.create({
@@ -288,6 +332,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 12
+  },
+  obligationDone: {
+    color: '#73E6A2'
+  },
+  obligationList: {
+    gap: 7,
+    marginTop: 12
+  },
+  obligationRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7
+  },
+  obligationText: {
+    color: colors.onSurfaceVariant,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800'
   },
   primaryAction: {
     alignItems: 'center',

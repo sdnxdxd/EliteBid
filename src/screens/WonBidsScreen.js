@@ -13,7 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { getUserPurchases, savePurchaseDeliveryAddress } from '../backend/auctionService';
+import { getUserPurchases, savePurchaseDeliveryAddress, settlePurchase } from '../backend/auctionService';
 import AppToast from '../components/AppToast';
 import BottomNav, { bottomNavHeight } from '../components/BottomNav';
 import { colors, radii } from '../theme';
@@ -22,6 +22,7 @@ export default function WonBidsScreen({ onBack, onNavigate, user }) {
   const [addresses, setAddresses] = useState({});
   const [loading, setLoading] = useState(true);
   const [purchases, setPurchases] = useState([]);
+  const [payingId, setPayingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [savingId, setSavingId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -91,6 +92,25 @@ export default function WonBidsScreen({ onBack, onNavigate, user }) {
     }
   }
 
+  async function confirmPayment(purchase) {
+    setPayingId(purchase.id);
+    try {
+      const rows = await settlePurchase(user.clienteId, purchase.id);
+      setPurchases(rows);
+      setAddresses(Object.fromEntries(rows.map((item) => [item.id, item.deliveryAddress || ''])));
+      setToast({ message: 'Pago confirmado. La compra quedo registrada.', tone: 'success' });
+    } catch (error) {
+      setToast({ message: error.message, tone: 'danger' });
+      try {
+        await load();
+      } catch {
+        // El mensaje principal es el error de pago; el usuario puede refrescar manualmente.
+      }
+    } finally {
+      setPayingId(null);
+    }
+  }
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -138,8 +158,8 @@ export default function WonBidsScreen({ onBack, onNavigate, user }) {
                         <Text style={styles.cardMeta}>Subasta ganada</Text>
                         <Text numberOfLines={2} style={styles.cardTitle}>{purchase.title}</Text>
                       </View>
-                      <View style={styles.statusPill}>
-                        <Text style={styles.statusText}>{purchase.deliveryAddress ? 'Entrega cargada' : 'Falta entrega'}</Text>
+                      <View style={[styles.statusPill, purchase.paymentStatus === 'multa' && styles.statusDanger]}>
+                        <Text style={styles.statusText}>{getPaymentStatusLabel(purchase)}</Text>
                       </View>
                     </View>
 
@@ -149,6 +169,25 @@ export default function WonBidsScreen({ onBack, onNavigate, user }) {
                       <Amount label="Envio" value={formatMoney(purchase.shippingCost)} />
                     </View>
                     <Text style={styles.total}>Total a pagar {formatMoney(purchase.totalDue)}</Text>
+                    <Pressable
+                      disabled={payingId === purchase.id || purchase.paymentStatus === 'pagada'}
+                      onPress={() => confirmPayment(purchase)}
+                      style={[
+                        styles.payButton,
+                        purchase.paymentStatus === 'pagada' && styles.buttonDisabled
+                      ]}
+                    >
+                      {payingId === purchase.id ? (
+                        <ActivityIndicator color={colors.onPrimaryFixed} />
+                      ) : (
+                        <>
+                          <Text style={styles.payButtonText}>
+                            {purchase.paymentStatus === 'pagada' ? 'Pago confirmado' : 'Confirmar pago'}
+                          </Text>
+                          <MaterialCommunityIcons color={colors.onPrimaryFixed} name="cash-check" size={18} />
+                        </>
+                      )}
+                    </Pressable>
 
                     <Text style={styles.fieldLabel}>Direccion de entrega</Text>
                     <TextInput
@@ -191,6 +230,12 @@ export default function WonBidsScreen({ onBack, onNavigate, user }) {
       />
     </View>
   );
+}
+
+function getPaymentStatusLabel(purchase) {
+  if (purchase.paymentStatus === 'pagada') return 'Pago confirmado';
+  if (purchase.paymentStatus === 'multa') return 'Multa activa';
+  return purchase.deliveryAddress ? 'Falta pago' : 'Falta pago y entrega';
 }
 
 function Amount({ label, value }) {
@@ -260,6 +305,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
+  buttonDisabled: {
+    opacity: 0.55
+  },
   container: {
     backgroundColor: colors.surfaceLowest,
     flex: 1
@@ -323,6 +371,22 @@ const styles = StyleSheet.create({
     padding: 12,
     textAlignVertical: 'top'
   },
+  payButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryContainer,
+    borderRadius: radii.full,
+    flexDirection: 'row',
+    gap: 8,
+    height: 42,
+    justifyContent: 'center',
+    marginTop: 12
+  },
+  payButtonText: {
+    color: colors.onPrimaryFixed,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase'
+  },
   list: {
     gap: 16
   },
@@ -360,6 +424,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 9,
     paddingVertical: 6
+  },
+  statusDanger: {
+    backgroundColor: 'rgba(255, 180, 171, 0.14)',
+    borderColor: 'rgba(255, 180, 171, 0.38)'
   },
   statusText: {
     color: colors.primary,

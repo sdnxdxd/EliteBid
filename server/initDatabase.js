@@ -148,6 +148,22 @@ async function migrateSecuritySchema() {
     'direccion_entrega',
     'ALTER TABLE registro_de_subasta ADD COLUMN direccion_entrega VARCHAR(255) AFTER estado_pago'
   );
+  await run("ALTER TABLE penalidades MODIFY estado ENUM('activa', 'pagada', 'vencida') DEFAULT 'activa'");
+  await run('ALTER TABLE penalidades MODIFY vencimiento DATE');
+  await run(
+    `CREATE TABLE IF NOT EXISTS penalidad_falta_fondos (
+      penalidad INT PRIMARY KEY,
+      puja INT NOT NULL,
+      registro INT,
+      total_requerido DECIMAL(14,2) NOT NULL DEFAULT 0,
+      vencimiento_fondos DATETIME NOT NULL,
+      multa_pagada_en DATETIME,
+      fondos_presentados ENUM('si', 'no') DEFAULT 'no',
+      fondos_presentados_en DATETIME,
+      creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_penalidad_fondos_penalidad FOREIGN KEY (penalidad) REFERENCES penalidades (identificador)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 
   const legacyUsers = await query(
     "SELECT id, password FROM usuarios WHERE password NOT LIKE 'scrypt$%'"

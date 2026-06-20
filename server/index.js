@@ -738,6 +738,16 @@ app.post('/api/usuarios/me/penalidades/:penaltyId/pagar', wrap(async (req, res) 
   res.json(await settlePenalty(viewer.clienteId, parsePositiveInt(req.params.penaltyId, 'Penalidad invalida.')));
 }));
 
+app.post('/api/usuarios/me/penalidades/:penaltyId/presentar-fondos', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const paymentMethodId = req.body.medioPagoId ?? req.body.paymentMethodId;
+  res.json(await presentPenaltyFunds(
+    viewer.clienteId,
+    parsePositiveInt(req.params.penaltyId, 'Penalidad invalida.'),
+    paymentMethodId
+  ));
+}));
+
 app.get('/api/usuarios/me/metricas', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
   res.json(await getUserSummary(viewer.clienteId));
@@ -1219,6 +1229,16 @@ app.post('/api/users/:clienteId/penalties/:penaltyId/settle', wrap(async (req, r
   res.json(await settlePenalty(viewer.clienteId, parsePositiveInt(req.params.penaltyId, 'Penalidad invalida.')));
 }));
 
+app.post('/api/users/:clienteId/penalties/:penaltyId/funds', wrap(async (req, res) => {
+  const viewer = await requireMatchingClient(req, req.params.clienteId);
+  const paymentMethodId = req.body.medioPagoId ?? req.body.paymentMethodId;
+  res.json(await presentPenaltyFunds(
+    viewer.clienteId,
+    parsePositiveInt(req.params.penaltyId, 'Penalidad invalida.'),
+    paymentMethodId
+  ));
+}));
+
 async function settlePurchase(clienteId, bidId) {
   await assertNotGuest(clienteId, 'Verifica tu cuenta para registrar compras.');
   const purchase = await first(
@@ -1271,30 +1291,56 @@ async function settlePurchase(clienteId, bidId) {
 async function registerInsufficientFundsPenalty(clienteId, purchase, totalDue, availableFunds) {
   const penaltyAmount = Math.round(Number(purchase.amount || 0) * 0.1 * 100) / 100;
   const description = `No se acreditaron fondos suficientes al confirmar el pago de ${formatMoney(purchase.amount)}. Debe abonar esta multa antes de participar en otra subasta y presentar los fondos necesarios dentro de las 72 horas. Total requerido: ${formatMoney(totalDue)}. Fondos disponibles declarados: ${formatMoney(availableFunds)}.`;
+  let receiptId = purchase.receiptId;
 
   if (purchase.receiptId) {
     await run('UPDATE registro_de_subasta SET estado_pago = ? WHERE identificador = ?', ['multa', purchase.receiptId]);
   } else {
-    await run(
+    const receipt = await run(
       `INSERT INTO registro_de_subasta (subasta, duenio, producto, cliente, medio_pago, importe, comision, estado_pago)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [purchase.auctionId, purchase.ownerId, purchase.productId, clienteId, purchase.paymentMethodId, purchase.amount, purchase.commission, 'multa']
     );
+    receiptId = receipt.insertId;
   }
 
   const existing = await first(
     `SELECT identificador AS id
-     FROM penalidades
-     WHERE cliente = ? AND titulo = ? AND estado IN ('activa', 'vencida')
+     FROM penalidades p
+     JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.cliente = ? AND pf.puja = ? AND p.estado IN ('activa', 'vencida')
      LIMIT 1`,
-    [clienteId, `Multa por falta de fondos - puja ${purchase.id}`]
+    [clienteId, purchase.id]
   );
 
   if (!existing) {
-    await run(
+    const penalty = await run(
       `INSERT INTO penalidades (cliente, titulo, descripcion, importe, estado, vencimiento)
-       VALUES (?, ?, ?, ?, ?, DATE_ADD(CURDATE(), INTERVAL 3 DAY))`,
-      [clienteId, `Multa por falta de fondos - puja ${purchase.id}`, description, penaltyAmount, 'activa']
+       VALUES (?, ?, ?, ?, ?, DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 72 HOUR)))`,
+      [
+        clienteId,
+        `Multa por falta de fondos - puja ${purchase.id}`,
+        description,
+        penaltyAmount,
+        'activa'
+      ]
+    );
+    await run(
+      `INSERT INTO penalidad_falta_fondos (penalidad, puja, registro, total_requerido, vencimiento_fondos)
+       VALUES (?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 72 HOUR))`,
+      [penalty.insertId, purchase.id, receiptId, totalDue]
+    );
+  } else {
+    await run(
+      `UPDATE penalidades p
+       JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+       SET pf.registro = COALESCE(pf.registro, ?),
+         pf.total_requerido = ?,
+         p.descripcion = ?,
+         p.vencimiento = COALESCE(p.vencimiento, DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 72 HOUR))),
+         pf.vencimiento_fondos = COALESCE(pf.vencimiento_fondos, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 72 HOUR))
+       WHERE p.identificador = ?`,
+      [receiptId, totalDue, description, existing.id]
     );
   }
 
@@ -1327,21 +1373,164 @@ async function savePurchaseDelivery(clienteId, bidId, value) {
 
 async function settlePenalty(clienteId, penaltyId) {
   await assertNotGuest(clienteId, 'Verifica tu cuenta para resolver penalidades.');
+  await expireOverduePenalties(clienteId);
   const penalty = await first(
-    'SELECT identificador AS id, estado AS status FROM penalidades WHERE identificador = ? AND cliente = ? LIMIT 1',
+    `SELECT p.identificador AS id, CASE WHEN pf.penalidad IS NULL THEN 'general' ELSE 'falta_fondos' END AS type,
+      p.estado AS status, pf.fondos_presentados AS fundsPresented, pf.multa_pagada_en AS finePaidAt
+     FROM penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.identificador = ? AND p.cliente = ?
+     LIMIT 1`,
     [penaltyId, clienteId]
   );
   if (!penalty) throw new Error('No encontramos esa penalidad.');
-  if (penalty.status !== 'activa' && penalty.status !== 'vencida') {
+  if (penalty.status === 'vencida') {
+    throw new Error('La penalidad vencio y la cuenta quedo bloqueada por falta de presentacion de fondos.');
+  }
+  if (penalty.status !== 'activa') {
     throw new Error('Esa penalidad ya esta solucionada.');
   }
-  await run('UPDATE penalidades SET estado = ? WHERE identificador = ? AND cliente = ?', [
-    'pagada',
-    penaltyId,
-    clienteId
-  ]);
+
+  const solved = penalty.type !== 'falta_fondos' || penalty.fundsPresented === 'si';
+  await run(
+    `UPDATE penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     SET pf.multa_pagada_en = COALESCE(pf.multa_pagada_en, UTC_TIMESTAMP()),
+       p.estado = ?
+     WHERE p.identificador = ? AND p.cliente = ?`,
+    [solved ? 'pagada' : 'activa', penaltyId, clienteId]
+  );
+  if (!solved) {
+    await refreshClientCategory(clienteId);
+    return getUserPenalties(clienteId);
+  }
+
+  await markPurchasePaidIfPenaltySolved(clienteId, penaltyId);
   await refreshClientCategory(clienteId);
   return getUserPenalties(clienteId);
+}
+
+async function presentPenaltyFunds(clienteId, penaltyId, paymentMethodId = null) {
+  await assertNotGuest(clienteId, 'Verifica tu cuenta para resolver penalidades.');
+  await expireOverduePenalties(clienteId);
+  const penalty = await first(
+    `SELECT p.identificador AS id, CASE WHEN pf.penalidad IS NULL THEN 'general' ELSE 'falta_fondos' END AS type,
+      p.estado AS status, pf.total_requerido AS totalRequired,
+      pf.fondos_presentados AS fundsPresented, pf.multa_pagada_en AS finePaidAt
+     FROM penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.identificador = ? AND p.cliente = ?
+     LIMIT 1`,
+    [penaltyId, clienteId]
+  );
+  if (!penalty) throw new Error('No encontramos esa penalidad.');
+  if (penalty.status === 'vencida') {
+    throw new Error('La penalidad vencio y la cuenta quedo bloqueada por falta de presentacion de fondos.');
+  }
+  if (penalty.status !== 'activa') throw new Error('Esa penalidad ya esta solucionada.');
+  if (penalty.type !== 'falta_fondos') throw new Error('Esta penalidad no requiere presentacion de fondos.');
+  if (penalty.fundsPresented === 'si') throw new Error('Los fondos ya fueron presentados.');
+
+  const payment = await resolvePenaltyPayment(clienteId, paymentMethodId);
+  const required = Number(penalty.totalRequired || 0);
+  if (Number(payment.guaranteeAmount || 0) < required) {
+    throw new Error(`El medio seleccionado no cubre el total requerido de ${formatMoney(required)}.`);
+  }
+
+  const solved = Boolean(penalty.finePaidAt);
+  await run(
+    `UPDATE penalidades p
+     JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     SET pf.fondos_presentados = 'si',
+       pf.fondos_presentados_en = UTC_TIMESTAMP(),
+       p.estado = ?
+     WHERE p.identificador = ? AND p.cliente = ?`,
+    [solved ? 'pagada' : 'activa', penaltyId, clienteId]
+  );
+  if (solved) {
+    await markPurchasePaidIfPenaltySolved(clienteId, penaltyId);
+  }
+  await refreshClientCategory(clienteId);
+  return getUserPenalties(clienteId);
+}
+
+async function resolvePenaltyPayment(clienteId, paymentMethodId = null) {
+  if (paymentMethodId) {
+    const payment = await first(
+      `SELECT identificador AS id, monto_garantia AS guaranteeAmount
+       FROM medios_pago
+       WHERE identificador = ? AND cliente = ? AND verificado = 'si'
+       LIMIT 1`,
+      [parsePositiveInt(paymentMethodId, 'Medio de pago invalido.'), clienteId]
+    );
+    if (!payment) throw new Error('Selecciona un medio de pago verificado para presentar fondos.');
+    return payment;
+  }
+
+  const payment = await first(
+    `SELECT identificador AS id, monto_garantia AS guaranteeAmount
+     FROM medios_pago
+     WHERE cliente = ? AND verificado = 'si'
+     ORDER BY monto_garantia DESC
+     LIMIT 1`,
+    [clienteId]
+  );
+  if (!payment) throw new Error('Necesitas un medio de pago verificado para presentar fondos.');
+  return payment;
+}
+
+async function markPurchasePaidIfPenaltySolved(clienteId, penaltyId) {
+  const penalty = await first(
+    `SELECT pf.registro AS receiptId
+     FROM penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.identificador = ? AND p.cliente = ?
+       AND p.estado = 'pagada'
+       AND (pf.penalidad IS NULL OR (pf.multa_pagada_en IS NOT NULL AND pf.fondos_presentados = 'si'))
+     LIMIT 1`,
+    [penaltyId, clienteId]
+  );
+  if (penalty?.receiptId) {
+    await run('UPDATE registro_de_subasta SET estado_pago = ? WHERE identificador = ? AND cliente = ?', [
+      'pagada',
+      penalty.receiptId,
+      clienteId
+    ]);
+  }
+}
+
+async function expireOverduePenalties(clienteId = null) {
+  const params = [];
+  const clientFilter = clienteId ? 'AND p.cliente = ?' : '';
+  if (clienteId) params.push(clienteId);
+
+  const overdue = await query(
+    `SELECT DISTINCT cliente AS clienteId
+     FROM penalidades p
+     JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.estado = 'activa'
+       AND pf.fondos_presentados = 'no'
+       AND pf.vencimiento_fondos <= UTC_TIMESTAMP()
+       ${clientFilter}`,
+    params
+  );
+
+  if (overdue.length === 0) return;
+
+  await run(
+    `UPDATE penalidades p
+     JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     SET p.estado = 'vencida'
+     WHERE p.estado = 'activa'
+       AND pf.fondos_presentados = 'no'
+       AND pf.vencimiento_fondos <= UTC_TIMESTAMP()
+       ${clientFilter}`,
+    params
+  );
+
+  for (const row of overdue) {
+    await run('UPDATE usuarios SET estado = ? WHERE cliente_id = ?', ['bloqueado', row.clienteId]);
+  }
 }
 
 async function resolveAuctionIdFromItemOrAuction(value) {
@@ -1874,6 +2063,11 @@ async function getOptionalAuthenticatedClient(req) {
   );
 
   if (!session) return null;
+  await expireOverduePenalties(session.clienteId);
+
+  const currentStatus = await first('SELECT estado FROM usuarios WHERE id = ? LIMIT 1', [session.id]);
+  session.estado = currentStatus?.estado ?? session.estado;
+
   const pendingGuest = session.rol === 'invitado' && session.estado === 'pendiente';
   if ((session.estado !== 'activo' && !pendingGuest) || session.admitido !== 'si') return null;
   return session;
@@ -1926,15 +2120,18 @@ async function assertNotGuest(clienteId, message) {
 }
 
 async function assertNoActivePenalties(clienteId) {
+  await expireOverduePenalties(clienteId);
   const penalties = await first(
-    `SELECT COUNT(*) AS total, COALESCE(SUM(importe), 0) AS amount
-     FROM penalidades
-     WHERE cliente = ? AND estado IN ('activa', 'vencida')`,
+    `SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN pf.multa_pagada_en IS NULL THEN p.importe ELSE 0 END), 0) AS amount
+     FROM penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.cliente = ? AND p.estado IN ('activa', 'vencida')`,
     [clienteId]
   );
 
   if (Number(penalties?.total || 0) > 0) {
-    throw new Error(`Tenes penalidades pendientes por ${formatMoney(penalties.amount)}. Debes abonarlas antes de participar en otra subasta.`);
+    throw new Error(`Tenes penalidades pendientes por ${formatMoney(penalties.amount)}. Debes pagar las multas y presentar los fondos requeridos antes de participar en otra subasta.`);
   }
 }
 
@@ -2003,9 +2200,11 @@ async function getUserNotifications(viewer) {
   }
 
   const activePenalties = await first(
-    `SELECT COUNT(*) AS total, COALESCE(SUM(importe), 0) AS amount
-     FROM penalidades
-     WHERE cliente = ? AND estado IN ('activa', 'vencida')`,
+    `SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN pf.multa_pagada_en IS NULL THEN p.importe ELSE 0 END), 0) AS amount
+     FROM penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.cliente = ? AND p.estado IN ('activa', 'vencida')`,
     [viewer.clienteId]
   );
 
@@ -2180,6 +2379,7 @@ async function getUserSummary(clienteId) {
 }
 
 async function getCategoryMetrics(clienteId) {
+  await expireOverduePenalties(clienteId);
   const payments = await first(
     `SELECT COUNT(*) AS verifiedPayments FROM medios_pago WHERE cliente = ? AND verificado = 'si'`,
     [clienteId]
@@ -2390,6 +2590,7 @@ function toLegacyUser(profile, viewer) {
 }
 
 async function getUserProfile(clienteId) {
+  await expireOverduePenalties(clienteId);
   const profile = await first(
     `SELECT p.identificador AS clienteId, p.documento, p.nombre AS fullName, p.direccion AS legalAddress,
       p.foto_uri AS photoUri, u.id AS userId, u.email, u.nombre AS firstName, c.categoria,
@@ -2398,8 +2599,11 @@ async function getUserProfile(clienteId) {
       (SELECT COUNT(*) FROM asistentes a WHERE a.cliente = p.identificador) AS auctionsAttended,
       (SELECT COUNT(*) FROM pujos pu JOIN asistentes a ON a.identificador = pu.asistente WHERE a.cliente = p.identificador AND pu.ganador = 'si') AS auctionsWon,
       (SELECT COALESCE(SUM(pu.importe), 0) FROM pujos pu JOIN asistentes a ON a.identificador = pu.asistente WHERE a.cliente = p.identificador AND pu.ganador = 'si') AS invested,
-      (SELECT COUNT(*) FROM penalidades pe WHERE pe.cliente = p.identificador AND pe.estado = 'activa') AS activePenaltyCount,
-      (SELECT COALESCE(SUM(pe.importe), 0) FROM penalidades pe WHERE pe.cliente = p.identificador AND pe.estado = 'activa') AS activePenaltyAmount
+      (SELECT COUNT(*) FROM penalidades pe WHERE pe.cliente = p.identificador AND pe.estado IN ('activa', 'vencida')) AS activePenaltyCount,
+      (SELECT COALESCE(SUM(CASE WHEN pf.multa_pagada_en IS NULL THEN pe.importe ELSE 0 END), 0)
+       FROM penalidades pe
+       LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = pe.identificador
+       WHERE pe.cliente = p.identificador AND pe.estado IN ('activa', 'vencida')) AS activePenaltyAmount
      FROM personas p
      JOIN clientes c ON c.identificador = p.identificador
      JOIN usuarios u ON u.cliente_id = c.identificador
@@ -2412,12 +2616,19 @@ async function getUserProfile(clienteId) {
 }
 
 async function getUserPenalties(clienteId) {
+  await expireOverduePenalties(clienteId);
   return query(
-    `SELECT identificador AS id, titulo AS title, descripcion AS description, importe AS amount,
-      estado AS status, DATE_FORMAT(vencimiento, '%Y-%m-%d') AS dueDate, creado_en AS createdAt
-     FROM penalidades
-     WHERE cliente = ?
-     ORDER BY CASE estado WHEN 'activa' THEN 0 WHEN 'vencida' THEN 1 ELSE 2 END, vencimiento ASC`,
+    `SELECT p.identificador AS id, CASE WHEN pf.penalidad IS NULL THEN 'general' ELSE 'falta_fondos' END AS type,
+      pf.puja AS bidId, pf.registro AS receiptId,
+      p.titulo AS title, p.descripcion AS description, p.importe AS amount, pf.total_requerido AS totalRequired,
+      pf.multa_pagada_en AS finePaidAt, pf.fondos_presentados AS fundsPresented,
+      pf.fondos_presentados_en AS fundsPresentedAt, p.estado AS status,
+      DATE_FORMAT(COALESCE(pf.vencimiento_fondos, p.vencimiento), '%Y-%m-%d %H:%i:%s') AS dueAt,
+      DATE_FORMAT(p.vencimiento, '%Y-%m-%d') AS dueDate, p.creado_en AS createdAt
+     FROM penalidades p
+     LEFT JOIN penalidad_falta_fondos pf ON pf.penalidad = p.identificador
+     WHERE p.cliente = ?
+     ORDER BY CASE p.estado WHEN 'activa' THEN 0 WHEN 'vencida' THEN 1 ELSE 2 END, COALESCE(pf.vencimiento_fondos, p.vencimiento) ASC`,
     [clienteId]
   );
 }

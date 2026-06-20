@@ -92,8 +92,6 @@ Si no hay SMTP ni `RESEND_API_KEY`, el registro no falla: el backend deja la cue
 
 En Render, las variables de correo se cargan en el servicio backend en **Environment**; el archivo `.env` de la PC no se publica. Configura `MAIL_USER` y `MAIL_PASSWORD` como secretos junto con los valores SMTP anteriores.
 
-Si Render no puede alcanzar el SMTP, configura `RESEND_API_KEY`. Cuando existe, EliteBid usa Resend por HTTPS antes que SMTP.
-
 ```bash
 curl -X POST http://127.0.0.1:3001/api/auth/resend-verification -H "Content-Type: application/json" -d "{\"email\":\"usuario@mail.com\"}"
 ```
@@ -198,6 +196,27 @@ SELECT * FROM penalidades ORDER BY identificador DESC;
 ```
 
 Tambien se puede usar MySQL Workbench o DBeaver conectando a `127.0.0.1:3307`, base `elitebid`.
+
+## Penalidades por falta de fondos
+
+Cuando un usuario confirma el pago de una puja ganada, el backend compara el total a pagar
+`puja + comision + envio` contra la garantia del medio de pago usado en la puja. Si no alcanza:
+
+- Se registra la compra con `estado_pago = 'multa'`.
+- Se crea una penalidad `tipo = 'falta_fondos'` por el 10% del valor ofertado.
+- La penalidad queda vinculada a la puja y al registro de compra.
+- El vencimiento se calcula a 72 horas desde el intento fallido.
+- El usuario no puede entrar ni pujar en otra subasta mientras tenga penalidades activas.
+- Para resolverla debe pagar la multa y presentar fondos suficientes mediante un medio verificado.
+- Si vence sin presentar fondos, la penalidad pasa a `vencida` y el usuario queda `bloqueado`.
+
+Endpoints principales:
+
+```http
+POST /api/users/:clienteId/purchases/:bidId/settle
+POST /api/users/:clienteId/penalties/:penaltyId/settle
+POST /api/users/:clienteId/penalties/:penaltyId/funds
+```
 
 ## Validacion rapida
 
