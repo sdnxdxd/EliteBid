@@ -100,6 +100,10 @@ function hasSmtpConfig() {
   return Boolean(process.env.SMTP_HOST && process.env.MAIL_USER && process.env.MAIL_PASSWORD);
 }
 
+function hasEmailProviderConfig() {
+  return hasSmtpConfig() || Boolean(process.env.RESEND_API_KEY);
+}
+
 function buildVerificationContent({ name, code }) {
   const firstName = escapeHtml(name || 'tu cuenta');
   const safeCode = escapeHtml(code);
@@ -180,6 +184,7 @@ function escapeHtml(value) {
 
 module.exports = {
   buildVerificationUrl,
+  hasEmailProviderConfig,
   sendAccountReviewEmail,
   sendPasswordResetEmail,
   sendVerificationEmail

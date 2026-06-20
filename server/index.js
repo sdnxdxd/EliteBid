@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 
 const { first, query, run } = require('./db');
-const { sendAccountReviewEmail, sendPasswordResetEmail, sendVerificationEmail } = require('./emailService');
+const { hasEmailProviderConfig, sendAccountReviewEmail, sendPasswordResetEmail, sendVerificationEmail } = require('./emailService');
 const { initDatabase } = require('./initDatabase');
 const { hashPassword, verifyPassword } = require('./passwordHash');
 
@@ -214,7 +214,7 @@ app.post('/api/auth/register-guest', wrap(async (req, res) => {
     toMysqlDateTime(new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000))
   ]);
 
-  const emailResult = await sendVerificationForUser({
+  const emailResult = queueVerificationForUser({
     email: form.email,
     name: form.firstName,
     token: verificationCode
@@ -272,7 +272,7 @@ app.post(['/api/auth/register/paso1', '/api/auth/registro/fase1'], wrap(async (r
   );
 
   const user = await first('SELECT id FROM usuarios WHERE lower(email) = ? LIMIT 1', [form.email]);
-  const emailResult = await sendVerificationForUser({
+  const emailResult = queueVerificationForUser({
     email: form.email,
     name: form.firstName,
     token: verificationCode
@@ -2462,6 +2462,22 @@ function errorHandler(error, _req, res, _next) {
 function bearerToken(req) {
   const value = req.headers.authorization || '';
   return value.startsWith('Bearer ') ? value.slice(7) : null;
+}
+
+function queueVerificationForUser({ email, name, token }) {
+  const configured = hasEmailProviderConfig();
+
+  void sendVerificationEmail({ to: email, name, token })
+    .then((result) => {
+      if (!result?.sent) {
+        console.warn(`El codigo de verificacion para ${email} quedo pendiente: ${result?.reason || 'proveedor no disponible'}.`);
+      }
+    })
+    .catch((error) => {
+      console.warn(`No se pudo enviar verificacion a ${email}: ${error.message}`);
+    });
+
+  return { sent: configured, queued: true };
 }
 
 async function sendVerificationForUser({ email, name, token }) {
