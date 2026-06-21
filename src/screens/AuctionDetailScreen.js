@@ -190,14 +190,14 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
           <Text style={styles.title}>{auction.itemTitle || auction.title}</Text>
           <Text style={styles.description}>{auction.fullDescription}</Text>
 
-          {auction.status !== 'abierta' ? <View style={styles.catalogCard}>
+          <View style={styles.catalogCard}>
             <View style={styles.catalogHeader}>
               <MaterialCommunityIcons color={colors.primary} name="format-list-bulleted" size={19} />
               <Text style={styles.catalogTitle}>Catalogo de productos</Text>
             </View>
             {(auction.catalog || []).map((item, index) => (
               <View key={item.itemId || item.productId || index} style={styles.catalogItem}>
-                <Image source={{ uri: item.imageUrl || auction.imageUrl }} style={styles.catalogImage} />
+                <Image source={{ uri: item.photoUrls?.[0] || item.imageUrl || auction.imageUrl }} style={styles.catalogImage} />
                 <View style={styles.catalogCopy}>
                   <Text style={styles.catalogItemTitle}>Pieza {index + 1}</Text>
                   <Text numberOfLines={2} style={styles.catalogDescription}>{item.description}</Text>
@@ -207,7 +207,7 @@ export default function AuctionDetailScreen({ auctionId, onBack, onEnterRoom, on
                 </View>
               </View>
             ))}
-          </View> : null}
+          </View>
 
           <View style={styles.infoGrid}>
             <InfoBlock label="Base" value={formatMoney(auction.basePrice)} />

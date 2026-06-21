@@ -519,9 +519,10 @@ function getPaymentIcon(type) {
 
 function getPaymentLabel(payment) {
   const detail = payment.parsedDetail || {};
-  if (payment.type === 'tarjeta') return `${detail.brand || 'Tarjeta'} ${detail.cardNumberLast4 || ''}`.trim();
-  if (payment.type === 'cheque') return `Cheque ${detail.checkNumberLast4 || ''}`.trim();
-  return `${detail.bank || 'Cuenta'} ${detail.cbuLast4 || detail.alias || ''}`.trim();
+  const currency = payment.currency ? ` ${payment.currency}` : '';
+  if (payment.type === 'tarjeta') return `${detail.brand || 'Tarjeta'} ${detail.cardNumberLast4 || ''}${currency}`.trim();
+  if (payment.type === 'cheque') return `Cheque ${detail.checkNumberLast4 || ''}${currency}`.trim();
+  return `${detail.bank || 'Cuenta'} ${detail.cbuLast4 || detail.alias || ''}${currency}`.trim();
 }
 
 function parseCurrency(value) {

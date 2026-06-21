@@ -105,7 +105,7 @@ export default function PaymentMethodsScreen({ onAdd, onBack, onUserUpdated, use
               {selectedMethod ? getMethodSummary(selectedMethod) : 'Sin metodo seleccionado'}
             </Text>
           </View>
-          <Text style={styles.walletAmount}>{formatMoney(selectedMethod?.amount ?? 0)}</Text>
+          <Text style={styles.walletAmount}>{formatMoney(selectedMethod?.amount ?? 0, selectedMethod?.currency)}</Text>
         </View>
 
         <View style={styles.sectionHeader}>
@@ -196,7 +196,7 @@ function PaymentCard({ deleting, method, onDelete, onSelect, selected }) {
       <View style={styles.paymentCardBottom}>
         <Text style={styles.paymentMask}>{mask}</Text>
         <View style={styles.paymentFooter}>
-          <Text style={styles.paymentAmount}>{formatMoney(method.amount)}</Text>
+          <Text style={styles.paymentAmount}>{formatMoney(method.amount, method.currency)}</Text>
           <Pressable disabled={deleting} onPress={onDelete} style={styles.deleteButton}>
             <MaterialCommunityIcons
               color={colors.error}
@@ -279,8 +279,9 @@ function getMethodSummary(method) {
   return `${getKindLabel(method.type)} seleccionado - ${getMethodMask(method)}`;
 }
 
-function formatMoney(value) {
-  return `$ ${Number(value || 0).toLocaleString('es-AR', {
+function formatMoney(value, currency = 'ARS') {
+  const prefix = currency === 'USD' ? 'USD' : '$';
+  return `${prefix} ${Number(value || 0).toLocaleString('es-AR', {
     maximumFractionDigits: 0
   })}`;
 }

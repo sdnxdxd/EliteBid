@@ -651,7 +651,7 @@ app.post('/api/usuarios/me/medios-de-pago', wrap(async (req, res) => {
   await run(
     `INSERT INTO medios_pago (cliente, tipo, detalle, moneda, monto_garantia, verificado)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [viewer.clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), 'ARS', payment.amount, verified]
+    [viewer.clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), payment.currency, payment.amount, verified]
   );
   await refreshClientCategory(viewer.clienteId);
   res.status(201).json(await getUserPayments(viewer.clienteId));
@@ -873,6 +873,79 @@ app.post('/api/solicitudes-venta/:requestId/rechazar-condiciones', wrap(async (r
   );
   const lot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
   if (!lot) throw new Error('No encontramos esa solicitud.');
+  res.json(toSaleRequestContract(lot));
+}));
+
+app.post('/api/solicitudes-venta/:requestId/inspeccion', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
+  await assertUserLot(viewer.clienteId, requestId);
+  await run(
+    `UPDATE solicitudes_lotes
+     SET estado = 'en_inspeccion',
+       ubicacion_deposito = COALESCE(?, ubicacion_deposito, 'Deposito EliteBid - Pendiente de sala'),
+       actualizado_en = CURRENT_TIMESTAMP
+     WHERE identificador = ? AND cliente = ?`,
+    [
+      req.body.ubicacionDeposito ? normalizeAddress(req.body.ubicacionDeposito) : null,
+      requestId,
+      viewer.clienteId
+    ]
+  );
+  const lot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
+  res.json(toSaleRequestContract(lot));
+}));
+
+app.post('/api/solicitudes-venta/:requestId/revision/aceptar', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
+  await assertUserLot(viewer.clienteId, requestId);
+  const review = sanitizeLotReviewApproval(req.body);
+  await run(
+    `UPDATE solicitudes_lotes
+     SET estado = 'a_confirmar',
+       ubicacion_deposito = ?,
+       poliza_seguro = ?,
+       aseguradora = ?,
+       fecha_subasta = ?,
+       hora_subasta = ?,
+       lugar_subasta = ?,
+       valor_base = ?,
+       comision = ?,
+       motivo_rechazo = NULL,
+       actualizado_en = CURRENT_TIMESTAMP
+     WHERE identificador = ? AND cliente = ?`,
+    [
+      review.storageLocation,
+      review.insurancePolicy,
+      review.insuranceCompany,
+      review.auctionDate,
+      review.auctionTime,
+      review.auctionLocation,
+      review.basePrice,
+      review.commission,
+      requestId,
+      viewer.clienteId
+    ]
+  );
+  const lot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
+  res.json(toSaleRequestContract(lot));
+}));
+
+app.post('/api/solicitudes-venta/:requestId/revision/rechazar', wrap(async (req, res) => {
+  const viewer = await requireAuthenticatedClient(req);
+  const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
+  await assertUserLot(viewer.clienteId, requestId);
+  const reason = normalizeLotText(req.body.motivo ?? req.body.reason, 'Indica el motivo del rechazo.', 1000, 8);
+  await run(
+    `UPDATE solicitudes_lotes
+     SET estado = 'rechazado',
+       motivo_rechazo = ?,
+       actualizado_en = CURRENT_TIMESTAMP
+     WHERE identificador = ? AND cliente = ?`,
+    [reason, requestId, viewer.clienteId]
+  );
+  const lot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
   res.json(toSaleRequestContract(lot));
 }));
 
@@ -1166,7 +1239,7 @@ app.post('/api/users/:clienteId/payments', wrap(async (req, res) => {
   await run(
     `INSERT INTO medios_pago (cliente, tipo, detalle, moneda, monto_garantia, verificado)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [viewer.clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), 'ARS', payment.amount, verified]
+    [viewer.clienteId, payment.type, JSON.stringify(buildPaymentDetail(payment)), payment.currency, payment.amount, verified]
   );
   await refreshClientCategory(viewer.clienteId);
   const summary = await first('SELECT COUNT(*) AS paymentCount FROM medios_pago WHERE cliente = ?', [viewer.clienteId]);
@@ -1628,6 +1701,7 @@ async function getAuctionDetail(auctionId, clienteId) {
       s.hora AS time, s.estado AS status, s.categoria AS category, s.moneda AS currency,
       s.ubicacion AS location, s.capacidad_asistentes AS capacity,
       COALESCE(p.imagen_uri, s.imagen_uri) AS imageUrl, p.descripcion_catalogo AS description,
+      (SELECT GROUP_CONCAT(f.uri ORDER BY f.orden SEPARATOR '\n') FROM fotos f WHERE f.producto = p.identificador) AS photoUrls,
       p.descripcion_catalogo AS itemTitle, p.descripcion_completa AS fullDescription, p.identificador AS productId,
       i.identificador AS itemId, i.precio_base AS basePrice, i.comision AS commission,
       i.puja_actual AS currentBid, i.subastado AS sold,
@@ -1662,7 +1736,7 @@ async function getAuctionDetail(auctionId, clienteId) {
     );
 
   const detail = {
-    ...auction,
+    ...withProductPhotos(auction),
     catalog: await getAuctionCatalogLots(auctionId, viewer),
     bidFeed: restrictedCatalog ? [] : await getAuctionBidFeed(auction.itemId),
     closure: restrictedCatalog ? null : await getAuctionClosure(auction.itemId, clienteId),
@@ -1682,6 +1756,7 @@ async function getAuctionCatalogLots(auctionId, viewer = null) {
     `SELECT s.identificador AS id, s.estado AS status, s.titulo AS auctionTitle,
       p.descripcion_catalogo AS description, p.descripcion_completa AS fullDescription,
       p.identificador AS productId, p.imagen_uri AS imageUrl,
+      (SELECT GROUP_CONCAT(f.uri ORDER BY f.orden SEPARATOR '\n') FROM fotos f WHERE f.producto = p.identificador) AS photoUrls,
       i.identificador AS itemId, i.precio_base AS basePrice, i.puja_actual AS currentBid,
       i.orden_lote AS lotPosition, i.comision AS commission, i.subastado AS sold, i.cierre_estado AS closureStatus,
       i.timer_inicio AS timerStartedAt, i.timer_vencimiento AS timerExpiresAt
@@ -1694,7 +1769,8 @@ async function getAuctionCatalogLots(auctionId, viewer = null) {
     [auctionId]
   );
 
-  return restrictedCatalog ? rows.map(redactAuctionPrice) : rows;
+  const mapped = rows.map(withProductPhotos);
+  return restrictedCatalog ? mapped.map(redactAuctionPrice) : mapped;
 }
 
 async function enterAuctionRoom(clienteId, auctionId) {
@@ -2142,6 +2218,20 @@ function redactAuctionPrice(auction) {
     basePrice: null,
     currentBid: null,
     commission: null
+  };
+}
+
+function withProductPhotos(row) {
+  const photos = String(row.photoUrls || '')
+    .split('\n')
+    .map((uri) => uri.trim())
+    .filter(Boolean);
+  const photoUrls = photos.length ? photos : (row.imageUrl ? [row.imageUrl] : []);
+
+  return {
+    ...row,
+    imageUrl: row.imageUrl || photoUrls[0] || '',
+    photoUrls
   };
 }
 
@@ -2624,10 +2714,16 @@ function toSaleRequestContract(lot) {
     estado: lot.status,
     fecha: lot.createdAt,
     fotos: lot.photoUris?.length || 0,
+    aseguradora: lot.insuranceCompany,
+    comision: lot.commission,
+    fechaSubasta: lot.auctionDate,
     items: lot.items || [],
+    lugarSubasta: lot.auctionLocation,
     productos: lot.items || [],
     nombreBien: lot.title,
+    polizaSeguro: lot.insurancePolicy,
     precioEstimado: Number(lot.estimatedValue || 0),
+    precioBase: lot.basePrice,
     tipoLote: lot.lotKind,
     uploadIds: lot.photoUris || [],
     userId: String(lot.clienteId || '')
@@ -2639,7 +2735,7 @@ function toCatalogLot(detail) {
     id: String(detail.itemId || detail.productId || detail.id),
     descripcion: detail.description,
     estado: detail.status,
-    fotos: detail.imageUrl ? [detail.imageUrl] : [],
+    fotos: detail.photoUrls?.length ? detail.photoUrls : (detail.imageUrl ? [detail.imageUrl] : []),
     loteId: String(detail.itemId || detail.productId || detail.id),
     nombre: detail.title || detail.auctionTitle || detail.description,
     precioBase: detail.basePrice,
@@ -3027,6 +3123,7 @@ function sanitizePayment(payload) {
   const rawType = normalizeWhitespace(payload.type).toLowerCase();
   const type = rawType === 'cuenta_bancaria' ? 'cuenta' : rawType;
   const amount = parseMoney(payload.amount, 'Ingresa un monto de garantia mayor a cero.');
+  const currency = normalizePaymentCurrency(payload.currency ?? payload.moneda);
 
   if (!['tarjeta', 'cuenta', 'cheque'].includes(type)) {
     throw new Error('Selecciona un tipo de medio de pago valido.');
@@ -3038,7 +3135,7 @@ function sanitizePayment(payload) {
     throw new Error(`El monto de garantia no puede superar ${formatMoney(MAX_GUARANTEE_AMOUNT)}.`);
   }
 
-  const sanitized = { ...payload, type, amount };
+  const sanitized = { ...payload, type, amount, currency };
 
   if (type === 'tarjeta') {
     requireFields(sanitized, [
@@ -3100,6 +3197,14 @@ function sanitizePayment(payload) {
   }
 
   return sanitized;
+}
+
+function normalizePaymentCurrency(value) {
+  const currency = normalizeWhitespace(value || 'ARS').toUpperCase();
+  if (!['ARS', 'USD'].includes(currency)) {
+    throw new Error('Selecciona una moneda valida: ARS o USD.');
+  }
+  return currency;
 }
 
 function requireFields(payload, fields) {
@@ -3239,6 +3344,69 @@ function sanitizeLotSubmission(payload) {
     photoUris: items.flatMap((item) => item.photoUris),
     items
   };
+}
+
+async function assertUserLot(clienteId, requestId) {
+  const lot = await first(
+    'SELECT identificador AS id FROM solicitudes_lotes WHERE identificador = ? AND cliente = ? LIMIT 1',
+    [requestId, clienteId]
+  );
+  if (!lot) throw new Error('No encontramos esa solicitud.');
+  return lot;
+}
+
+function sanitizeLotReviewApproval(payload) {
+  const required = [
+    ['storageLocation', 'Indica el deposito donde queda el bien.'],
+    ['insurancePolicy', 'Indica la poliza de seguro.'],
+    ['insuranceCompany', 'Indica la aseguradora.'],
+    ['auctionDate', 'Indica la fecha de subasta.'],
+    ['auctionTime', 'Indica la hora de subasta.'],
+    ['auctionLocation', 'Indica el lugar de subasta.'],
+    ['basePrice', 'Indica el valor base.'],
+    ['commission', 'Indica la comision.']
+  ];
+
+  for (const [key, message] of required) {
+    if (!String(payload[key] ?? '').trim()) throw new Error(message);
+  }
+
+  const auctionDate = toMysqlDateOnly(normalizeDate(payload.auctionDate, 'Indica una fecha de subasta valida.'));
+  const dateValue = new Date(`${auctionDate}T12:00:00Z`);
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  if (dateValue <= today) {
+    throw new Error('La fecha de subasta debe ser futura.');
+  }
+
+  const auctionTime = normalizeWhitespace(payload.auctionTime);
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(auctionTime)) {
+    throw new Error('Indica la hora de subasta con formato HH:MM.');
+  }
+
+  const basePrice = parseMoney(payload.basePrice, 'Indica un valor base valido.');
+  const commission = parseMoney(payload.commission, 'Indica una comision valida.');
+  if (basePrice <= 0) throw new Error('El valor base debe ser mayor a cero.');
+  if (commission <= 0) throw new Error('La comision debe ser mayor a cero.');
+
+  return {
+    auctionDate,
+    auctionLocation: normalizeAddress(payload.auctionLocation),
+    auctionTime,
+    basePrice,
+    commission,
+    insuranceCompany: normalizeTitleText(payload.insuranceCompany, 'Indica una aseguradora valida.'),
+    insurancePolicy: normalizeLotText(payload.insurancePolicy, 'Indica una poliza valida.', 80, 3),
+    storageLocation: normalizeAddress(payload.storageLocation)
+  };
+}
+
+function toMysqlDateOnly(value) {
+  const [day, month, year] = String(value).split('/').map(Number);
+  if (!day || !month || !year) {
+    throw new Error('Indica una fecha valida.');
+  }
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function sanitizeLotItem(item, order) {

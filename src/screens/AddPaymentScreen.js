@@ -31,6 +31,7 @@ const initialForm = {
   checkNumber: '',
   issueDate: '',
   checkImageUri: '',
+  currency: 'ARS',
   amount: ''
 };
 
@@ -151,9 +152,23 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
         )}
 
         <View style={styles.commonFields}>
+          <Text style={styles.fieldLabel}>Moneda de garantia</Text>
+          <View style={styles.currencyTabs}>
+            {['ARS', 'USD'].map((currency) => (
+              <Pressable
+                key={currency}
+                onPress={() => updateField('currency', currency)}
+                style={[styles.currencyTab, form.currency === currency && styles.currencyTabActive]}
+              >
+                <Text style={[styles.currencyTabText, form.currency === currency && styles.currencyTabTextActive]}>
+                  {currency}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
           <Field
             keyboardType="numeric"
-            label="Monto garantia en pesos argentinos"
+            label={`Monto garantia en ${form.currency}`}
             maxLength={12}
             onChangeText={(value) => updateField('amount', value)}
             placeholder="500000"
@@ -161,7 +176,9 @@ export default function AddPaymentScreen({ onBack, onSaved, user }) {
           />
           <View style={styles.currencyNotice}>
             <MaterialCommunityIcons color={colors.primary} name="cash-multiple" size={19} />
-            <Text style={styles.currencyNoticeText}>Todas las operaciones se manejan en pesos argentinos.</Text>
+            <Text style={styles.currencyNoticeText}>
+              Cada subasta define su moneda. Para subastas en dolares usa cuenta o tarjeta habilitada en USD.
+            </Text>
           </View>
         </View>
 
@@ -496,6 +513,32 @@ const styles = StyleSheet.create({
   },
   commonFields: {
     marginTop: 4
+  },
+  currencyTab: {
+    alignItems: 'center',
+    borderColor: 'rgba(204, 193, 255, 0.18)',
+    borderRadius: radii.full,
+    borderWidth: 1,
+    flex: 1,
+    height: 44,
+    justifyContent: 'center'
+  },
+  currencyTabActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
+  currencyTabs: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16
+  },
+  currencyTabText: {
+    color: colors.onSurfaceVariant,
+    fontSize: 13,
+    fontWeight: '900'
+  },
+  currencyTabTextActive: {
+    color: colors.onPrimaryFixed
   },
   container: {
     backgroundColor: colors.surfaceLowest,

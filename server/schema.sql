@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS empleados (
   sector INT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS sectores (
+  identificador INT AUTO_INCREMENT PRIMARY KEY,
+  nombreSector VARCHAR(150) NOT NULL,
+  codigoSector VARCHAR(10),
+  responsableSector INT,
+  CONSTRAINT fk_sectores_empleados FOREIGN KEY (responsableSector) REFERENCES empleados (identificador)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS clientes (
   identificador INT PRIMARY KEY,
   numero_pais INT,
@@ -71,7 +79,7 @@ CREATE TABLE IF NOT EXISTS subastas (
   tiene_deposito ENUM('si', 'no'),
   seguridad_propia ENUM('si', 'no'),
   categoria ENUM('comun', 'especial', 'plata', 'oro', 'platino'),
-  moneda ENUM('ARS') DEFAULT 'ARS',
+  moneda ENUM('ARS', 'USD') DEFAULT 'ARS',
   imagen_uri TEXT,
   CONSTRAINT fk_subastas_subastadores FOREIGN KEY (subastador) REFERENCES subastadores (identificador)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -89,6 +97,16 @@ CREATE TABLE IF NOT EXISTS productos (
   CONSTRAINT fk_productos_revisor FOREIGN KEY (revisor) REFERENCES empleados (identificador),
   CONSTRAINT fk_productos_duenio FOREIGN KEY (duenio) REFERENCES duenios (identificador),
   CONSTRAINT fk_productos_seguro FOREIGN KEY (seguro) REFERENCES seguros (nro_poliza)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS fotos (
+  identificador INT AUTO_INCREMENT PRIMARY KEY,
+  producto INT NOT NULL,
+  foto LONGBLOB,
+  uri MEDIUMTEXT,
+  orden INT NOT NULL DEFAULT 1,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_fotos_productos FOREIGN KEY (producto) REFERENCES productos (identificador)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS catalogos (
@@ -162,7 +180,7 @@ CREATE TABLE IF NOT EXISTS medios_pago (
   cliente INT NOT NULL,
   tipo ENUM('cuenta', 'tarjeta', 'cheque') NOT NULL,
   detalle JSON NOT NULL,
-  moneda ENUM('ARS') DEFAULT 'ARS',
+  moneda ENUM('ARS', 'USD') DEFAULT 'ARS',
   monto_garantia DECIMAL(14,2) DEFAULT 0,
   verificado ENUM('si', 'no') DEFAULT 'no',
   CONSTRAINT fk_medios_pago_cliente FOREIGN KEY (cliente) REFERENCES clientes (identificador)

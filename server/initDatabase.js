@@ -148,6 +148,8 @@ async function migrateSecuritySchema() {
     'direccion_entrega',
     'ALTER TABLE registro_de_subasta ADD COLUMN direccion_entrega VARCHAR(255) AFTER estado_pago'
   );
+  await run("ALTER TABLE subastas MODIFY moneda ENUM('ARS', 'USD') DEFAULT 'ARS'");
+  await run("ALTER TABLE medios_pago MODIFY moneda ENUM('ARS', 'USD') DEFAULT 'ARS'");
   await run("ALTER TABLE penalidades MODIFY estado ENUM('activa', 'pagada', 'vencida') DEFAULT 'activa'");
   await run('ALTER TABLE penalidades MODIFY vencimiento DATE');
   await run(
@@ -162,6 +164,26 @@ async function migrateSecuritySchema() {
       fondos_presentados_en DATETIME,
       creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_penalidad_fondos_penalidad FOREIGN KEY (penalidad) REFERENCES penalidades (identificador)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+  await run(
+    `CREATE TABLE IF NOT EXISTS sectores (
+      identificador INT AUTO_INCREMENT PRIMARY KEY,
+      nombreSector VARCHAR(150) NOT NULL,
+      codigoSector VARCHAR(10),
+      responsableSector INT,
+      CONSTRAINT fk_sectores_empleados FOREIGN KEY (responsableSector) REFERENCES empleados (identificador)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+  await run(
+    `CREATE TABLE IF NOT EXISTS fotos (
+      identificador INT AUTO_INCREMENT PRIMARY KEY,
+      producto INT NOT NULL,
+      foto LONGBLOB,
+      uri MEDIUMTEXT,
+      orden INT NOT NULL DEFAULT 1,
+      creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_fotos_productos FOREIGN KEY (producto) REFERENCES productos (identificador)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
 
@@ -214,6 +236,11 @@ async function seedDatabase() {
     'Verificador senior',
     1
   ]);
+  await run(
+    `INSERT IGNORE INTO sectores (identificador, nombreSector, codigoSector, responsableSector)
+     VALUES (?, ?, ?, ?)`,
+    [1, 'Verificacion y catalogacion', 'VER', 2]
+  );
   await run(
     `INSERT IGNORE INTO clientes (identificador, numero_pais, admitido, categoria, verificador)
      VALUES (?, ?, ?, ?, ?)`,
@@ -430,6 +457,7 @@ async function seedAuction(auction) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [auction.id, auction.date, 'si', auction.product, auction.product, 2, 3, null, auction.image]
   );
+  await seedProductPhotos(auction.id, auction.image);
   await run(
     `INSERT IGNORE INTO catalogos (identificador, descripcion, subasta, responsable)
      VALUES (?, ?, ?, ?)`,
@@ -464,10 +492,26 @@ async function seedAuction(auction) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [productId, auction.date, 'si', item.product, item.product, 2, 3, null, item.image || auction.image]
     );
+    await seedProductPhotos(productId, item.image || auction.image);
     await run(
       `INSERT IGNORE INTO items_catalogo (identificador, catalogo, orden_lote, producto, precio_base, comision, subastado, puja_actual)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [itemId, auction.id, index + 2, productId, item.basePrice, item.basePrice * 0.12, 'no', item.currentBid || 0]
+    );
+  }
+}
+
+async function seedProductPhotos(productId, uri) {
+  if (!uri) return;
+
+  for (let order = 1; order <= 6; order += 1) {
+    await run(
+      `INSERT INTO fotos (producto, uri, orden)
+       SELECT ?, ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM fotos WHERE producto = ? AND orden = ?
+       )`,
+      [productId, uri, order, productId, order]
     );
   }
 }

@@ -576,23 +576,25 @@ async function runAuthRegistrationMatrix(db) {
 
 async function cleanup(db, touched = {}) {
   if (touched.itemId && touched.previousBid != null) {
-    await db.query(
-      `UPDATE items_catalogo
-       SET puja_actual = ?, subastado = COALESCE(?, subastado),
-         timer_inicio = NULL, timer_vencimiento = NULL,
-         cierre_estado = 'esperando_puja', cierre_motivo = NULL
-       WHERE identificador = ?`,
-      [
-      touched.previousBid,
-      touched.previousSubastado ?? null,
-      touched.itemId
-      ]
-    );
+    await restoreTouchedItem(db, {
+      itemId: touched.itemId,
+      previousBid: touched.previousBid,
+      previousSubastado: touched.previousSubastado
+    });
+  }
+  for (const item of touched.extraItems || []) {
+    await restoreTouchedItem(db, item);
   }
   if (touched.auctionId && touched.previousAuctionStatus) {
     await db.query('UPDATE subastas SET estado = ? WHERE identificador = ?', [
       touched.previousAuctionStatus,
       touched.auctionId
+    ]);
+  }
+  for (const auction of touched.extraAuctions || []) {
+    await db.query('UPDATE subastas SET estado = ? WHERE identificador = ?', [
+      auction.previousAuctionStatus,
+      auction.auctionId
     ]);
   }
 
@@ -607,6 +609,11 @@ async function cleanup(db, touched = {}) {
     );
     await db.query('DELETE FROM solicitudes_lotes WHERE cliente = ?', [row.clienteId]);
     await db.query('DELETE FROM registro_de_subasta WHERE cliente = ?', [row.clienteId]);
+    await db.query(
+      'DELETE pf FROM penalidad_falta_fondos pf JOIN penalidades p ON p.identificador = pf.penalidad WHERE p.cliente = ?',
+      [row.clienteId]
+    );
+    await db.query('DELETE FROM penalidades WHERE cliente = ?', [row.clienteId]);
     await db.query(
       'DELETE p FROM pujos p JOIN asistentes a ON a.identificador = p.asistente WHERE a.cliente = ?',
       [row.clienteId]
@@ -624,6 +631,23 @@ async function cleanup(db, touched = {}) {
   await resetAutoIncrement(db, 'usuarios', 'id');
   await resetAutoIncrement(db, 'personas', 'identificador');
   await resetAutoIncrement(db, 'documentos_identidad', 'identificador');
+}
+
+async function restoreTouchedItem(db, touchedItem) {
+  await db.query(
+    `UPDATE items_catalogo
+     SET puja_actual = ?, subastado = COALESCE(?, subastado),
+       timer_inicio = NULL, timer_vencimiento = NULL,
+       cierre_estado = COALESCE(?, 'esperando_puja'), cierre_motivo = ?
+     WHERE identificador = ?`,
+    [
+      touchedItem.previousBid,
+      touchedItem.previousSubastado ?? null,
+      touchedItem.previousClosureStatus ?? null,
+      touchedItem.previousClosureReason ?? null,
+      touchedItem.itemId
+    ]
+  );
 }
 
 async function resetAutoIncrement(db, table, primaryKey) {
@@ -653,6 +677,41 @@ function validLotPayload() {
   };
 }
 
+function validCollectionPayload() {
+  const first = validLotPayload();
+  return {
+    ...first,
+    title: 'Coleccion QA de Diseno',
+    items: [
+      {
+        title: 'Silla QA de autor',
+        itemType: 'Diseno',
+        quantity: 1,
+        estimatedValue: 120000,
+        description: 'Silla de autor con estructura original.',
+        condition: 'Estado muy bueno con marcas menores.',
+        history: 'Pieza adquirida en galeria local.',
+        photoUris: Array.from({ length: 6 }, (_, index) => `file:///qa/coleccion-silla-${index + 1}.jpg`)
+      },
+      {
+        title: 'Lampara QA industrial',
+        itemType: 'Diseno',
+        quantity: 1,
+        estimatedValue: 90000,
+        description: 'Lampara industrial restaurada.',
+        condition: 'Funcionamiento probado y restauracion documentada.',
+        history: 'Objeto familiar con factura disponible.',
+        photoUris: Array.from({ length: 6 }, (_, index) => `file:///qa/coleccion-lampara-${index + 1}.jpg`)
+      }
+    ]
+  };
+}
+
+function futureDate(days = 20) {
+  const value = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  return value.toISOString().slice(0, 10);
+}
+
 function todaySlashDate() {
   const now = new Date();
   const day = String(now.getDate()).padStart(2, '0');
@@ -665,6 +724,7 @@ async function main() {
   server = app.listen(PORT, '127.0.0.1');
   const db = await createDb();
   const touched = {};
+  await cleanup(db);
 
   try {
     await request('/health');
@@ -727,6 +787,15 @@ async function main() {
     const publicCatalog = await request(`/auctions?clienteId=${userA.clienteId}`);
     if (publicCatalog.some((auction) => auction.basePrice !== null || auction.status !== 'programada')) {
       throw new Error('Catalogo publico filtro mal precios o estados');
+    }
+    const publicUpcoming = publicCatalog[0];
+    if (!publicUpcoming) throw new Error('No hay subastas futuras publicas para QA');
+    const publicDetail = await request(`/auctions/${publicUpcoming.id}`);
+    if (!Array.isArray(publicDetail.catalog) || publicDetail.catalog.length < 2) {
+      throw new Error('El catalogo publico no expone la lista de productos');
+    }
+    if (publicDetail.catalog.some((item) => item.basePrice !== null || item.currentBid !== null || item.commission !== null)) {
+      throw new Error('El catalogo publico revelo precios reservados');
     }
     logOk('clienteId sin sesion no revela precios');
 
@@ -832,6 +901,20 @@ async function main() {
           checkImageUri: 'file:///qa/cheque.jpg'
         })
       }), 'futura');
+    await expectReject('moneda de pago invalida rechazada', () =>
+      request(`/users/${userA.clienteId}/payments`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({
+          type: 'tarjeta',
+          currency: 'EUR',
+          amount: 100000,
+          cardHolder: 'qa robustez',
+          cardNumber: '4111111111111111',
+          expiry: '12/30',
+          cvv: '123'
+        })
+      }), 'moneda');
 
     await request(`/users/${userA.clienteId}/payments`, {
       method: 'POST',
@@ -846,6 +929,24 @@ async function main() {
       })
     });
     logOk('pago valido agregado');
+    await request(`/users/${userA.clienteId}/payments`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({
+        type: 'cuenta',
+        currency: 'USD',
+        amount: 250000,
+        bank: 'Banco Exterior QA',
+        accountType: 'Cuenta internacional',
+        cbu: '1234567890123456789012',
+        alias: 'qa.usd.demo'
+      })
+    });
+    const usdPaymentRows = await request(`/users/${userA.clienteId}/payments`, { token: userA.sessionToken });
+    if (!usdPaymentRows.some((payment) => payment.type === 'cuenta' && payment.currency === 'USD')) {
+      throw new Error('El pago USD no quedo persistido');
+    }
+    logOk('pago USD valido agregado');
     await request(`/users/${userA.clienteId}/payments`, {
       method: 'POST',
       token: userA.sessionToken,
@@ -885,6 +986,66 @@ async function main() {
     });
     logOk('segundo usuario con pago valido');
 
+    const userGold = await verifyGuest(db, await registerGuest(db, 4));
+    await db.query("UPDATE clientes SET categoria = 'oro' WHERE identificador = ?", [userGold.clienteId]);
+    await request(`/users/${userGold.clienteId}/payments`, {
+      method: 'POST',
+      token: userGold.sessionToken,
+      body: JSON.stringify({
+        type: 'tarjeta',
+        amount: 100000000,
+        cardHolder: 'qa oro',
+        cardNumber: '4111111111111111',
+        expiry: '12/30',
+        cvv: '123'
+      })
+    });
+    const [goldAuctionRows] = await db.query(
+      `SELECT s.identificador AS auctionId, s.estado AS auctionStatus, i.identificador AS itemId,
+        i.puja_actual AS currentBid, i.subastado AS subastado
+       FROM subastas s
+       JOIN catalogos c ON c.subasta = s.identificador
+       JOIN items_catalogo i ON i.catalogo = c.identificador
+       WHERE s.categoria = 'oro'
+       ORDER BY s.identificador ASC, i.orden_lote ASC
+       LIMIT 1`
+    );
+    const goldAuctionSeed = goldAuctionRows[0];
+    if (!goldAuctionSeed) throw new Error('No hay subasta oro para QA');
+    touched.extraAuctions = touched.extraAuctions || [];
+    touched.extraAuctions.push({
+      auctionId: goldAuctionSeed.auctionId,
+      previousAuctionStatus: goldAuctionSeed.auctionStatus
+    });
+    touched.extraItems = touched.extraItems || [];
+    touched.extraItems.push({
+      itemId: goldAuctionSeed.itemId,
+      previousBid: goldAuctionSeed.currentBid,
+      previousSubastado: goldAuctionSeed.subastado
+    });
+    await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [goldAuctionSeed.auctionId]);
+    await db.query(
+      `UPDATE items_catalogo
+       SET subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ?`,
+      [goldAuctionSeed.itemId]
+    );
+    const goldAuctions = await request(`/auctions?clienteId=${userGold.clienteId}`, { token: userGold.sessionToken });
+    const activeGold = goldAuctions.find((auction) => Number(auction.id) === Number(goldAuctionSeed.auctionId));
+    if (!activeGold || activeGold.status !== 'abierta') throw new Error('No se pudo preparar subasta oro abierta para QA');
+    const goldDetail = await request(`/auctions/${activeGold.id}`, { token: userGold.sessionToken });
+    const goldHighAmount = Number(goldDetail.currentBid) + Math.ceil(Number(goldDetail.basePrice) * 0.25);
+    const goldBid = await request(`/auctions/${activeGold.id}/bids`, {
+      method: 'POST',
+      token: userGold.sessionToken,
+      body: JSON.stringify({ clienteId: userGold.clienteId, amount: goldHighAmount })
+    });
+    if (Number(goldBid.auction.currentBid) !== goldHighAmount) {
+      throw new Error('La subasta oro no acepto una puja superior al 20 porciento');
+    }
+    logOk('puja oro superior al 20 porciento aceptada');
+
     const notifications = await request('/notificaciones', { token: userA.sessionToken });
     if (!Array.isArray(notifications) || notifications.length === 0) {
       throw new Error('Las notificaciones no devolvieron datos');
@@ -917,21 +1078,110 @@ async function main() {
     const createdLot = lots.find((lot) => lot.title === 'Lote QA Robustez');
     const pdfSaleDetail = await request(`/solicitudes-venta/${createdLot.id}`, { token: userA.sessionToken });
     if (String(pdfSaleDetail.id) !== String(createdLot.id)) throw new Error('/solicitudes-venta/{id} no devolvio detalle');
-    await request(`/solicitudes-venta/${createdLot.id}/aceptar-condiciones`, { method: 'POST', token: userA.sessionToken });
+    await expectReject('revision lote fecha pasada rechazada', () =>
+      request(`/solicitudes-venta/${createdLot.id}/revision/aceptar`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({
+          auctionDate: '2020-01-01',
+          auctionLocation: 'Sala QA',
+          auctionTime: '19:30',
+          basePrice: 100000,
+          commission: 12000,
+          insuranceCompany: 'Aseguradora QA',
+          insurancePolicy: 'POL-QA-001',
+          storageLocation: 'Deposito QA'
+        })
+      }), 'futura');
+    const reviewedLot = await request(`/solicitudes-venta/${createdLot.id}/revision/aceptar`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({
+        auctionDate: futureDate(),
+        auctionLocation: 'Sala QA Retiro',
+        auctionTime: '19:30',
+        basePrice: 100000,
+        commission: 12000,
+        insuranceCompany: 'Aseguradora QA',
+        insurancePolicy: 'POL-QA-001',
+        storageLocation: 'Deposito QA Norte'
+      })
+    });
+    if (reviewedLot.estado !== 'a_confirmar' || reviewedLot.polizaSeguro !== 'POL-QA-001') {
+      throw new Error('La revision aceptada no dejo el lote a confirmar con seguro');
+    }
+    const acceptedLot = await request(`/solicitudes-venta/${createdLot.id}/aceptar-condiciones`, { method: 'POST', token: userA.sessionToken });
+    if (acceptedLot.estado !== 'aceptado') throw new Error('Aceptar condiciones no dejo el lote aceptado');
     const pdfGoods = await request('/mis-bienes', { token: userA.sessionToken });
-    if (!Array.isArray(pdfGoods)) throw new Error('/mis-bienes no devolvio lista');
-    await request(`/mis-bienes/${createdLot.id}/seguro`, { token: userA.sessionToken });
-    await request(`/mis-bienes/${createdLot.id}/ubicacion`, { token: userA.sessionToken });
-    await request(`/solicitudes-venta/${createdLot.id}/rechazar-condiciones`, {
+    if (!Array.isArray(pdfGoods) || !pdfGoods.some((lot) => Number(lot.id) === Number(createdLot.id))) {
+      throw new Error('/mis-bienes no devolvio el lote aceptado');
+    }
+    const insurance = await request(`/mis-bienes/${createdLot.id}/seguro`, { token: userA.sessionToken });
+    if (insurance.poliza !== 'POL-QA-001' || insurance.estado !== 'vigente') throw new Error('/mis-bienes/{id}/seguro no devolvio poliza vigente');
+    const location = await request(`/mis-bienes/${createdLot.id}/ubicacion`, { token: userA.sessionToken });
+    if (location.ubicacion !== 'Deposito Qa Norte') throw new Error('/mis-bienes/{id}/ubicacion no devolvio deposito');
+    const rejectedByUser = await request(`/solicitudes-venta/${createdLot.id}/rechazar-condiciones`, {
       method: 'POST',
       token: userA.sessionToken,
       body: JSON.stringify({ motivo: 'QA rechazo condiciones' })
     });
+    if (rejectedByUser.estado !== 'rechazado') throw new Error('Rechazar condiciones no dejo el lote rechazado');
+
+    const collectionRows = await request(`/users/${userA.clienteId}/lots`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify(validCollectionPayload())
+    });
+    const collectionLot = collectionRows.find((lot) => lot.title === 'Coleccion QA de Diseno');
+    if (!collectionLot || collectionLot.lotKind !== 'variado' || collectionLot.items.length !== 2) {
+      throw new Error('La coleccion con varios productos no quedo guardada correctamente');
+    }
+    const rejectedReview = await request(`/solicitudes-venta/${collectionLot.id}/revision/rechazar`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({ motivo: 'Origen licito insuficiente para QA' })
+    });
+    if (rejectedReview.estado !== 'rechazado' || !String(rejectedReview.rejectionReason || '').includes('Origen licito')) {
+      throw new Error('La revision rechazada no guardo motivo');
+    }
     logOk('pdf solicitudes venta y mis bienes compatibles');
 
+    const [commonAuctionRows] = await db.query(
+      `SELECT s.identificador AS auctionId, s.estado AS auctionStatus, i.identificador AS itemId,
+        i.puja_actual AS currentBid, i.subastado AS subastado,
+        i.cierre_estado AS closureStatus, i.cierre_motivo AS closureReason
+       FROM subastas s
+       JOIN catalogos c ON c.subasta = s.identificador
+       JOIN items_catalogo i ON i.catalogo = c.identificador
+       WHERE s.categoria = 'comun'
+       ORDER BY s.identificador ASC, i.orden_lote ASC
+       LIMIT 1`
+    );
+    const commonAuctionSeed = commonAuctionRows[0];
+    if (!commonAuctionSeed) throw new Error('No hay subasta comun para QA');
+    await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [commonAuctionSeed.auctionId]);
+    await db.query(
+      `UPDATE items_catalogo
+       SET subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ?`,
+      [commonAuctionSeed.itemId]
+    );
+
     const auctions = await request(`/auctions?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
-    const activeCommon = auctions.find((auction) => auction.status === 'abierta' && auction.category === 'comun');
+    const activeCommon = auctions.find((auction) => Number(auction.id) === Number(commonAuctionSeed.auctionId));
     if (!activeCommon) throw new Error('No hay subasta comun abierta para QA');
+    const registeredDetail = await request(`/auctions/${activeCommon.id}`, { token: userA.sessionToken });
+    if (!Array.isArray(registeredDetail.catalog) || registeredDetail.catalog.length < 2) {
+      throw new Error('La subasta registrada no devolvio catalogo con productos');
+    }
+    if (registeredDetail.catalog.some((item) => item.basePrice == null)) {
+      throw new Error('El usuario registrado no ve precios base del catalogo');
+    }
+    if (registeredDetail.catalog.some((item) => !Array.isArray(item.photoUrls) || item.photoUrls.length < 6)) {
+      throw new Error('El catalogo no devolvio las fotos esperadas por producto');
+    }
+    logOk('catalogo subasta-productos con precios y fotos');
 
     await expectReject('entrar a sala sin sesion bloqueado', () =>
       request(`/auctions/${activeCommon.id}/enter`, {
@@ -957,14 +1207,17 @@ async function main() {
     if (Number(pdfRoom.id) !== Number(activeCommon.id)) throw new Error('/subastas/{id}/ingresar no devolvio sala');
     touched.itemId = room.itemId;
     touched.auctionId = activeCommon.id;
-    touched.previousBid = activeCommon.currentBid;
-    const [itemRows] = await db.query('SELECT subastado FROM items_catalogo WHERE identificador = ?', [room.itemId]);
-    touched.previousSubastado = itemRows[0]?.subastado;
-    const [auctionRows] = await db.query('SELECT estado FROM subastas WHERE identificador = ?', [activeCommon.id]);
-    touched.previousAuctionStatus = auctionRows[0]?.estado;
+    touched.previousBid = commonAuctionSeed.currentBid;
+    touched.previousSubastado = commonAuctionSeed.subastado;
+    touched.previousClosureStatus = commonAuctionSeed.closureStatus;
+    touched.previousClosureReason = commonAuctionSeed.closureReason;
+    touched.previousAuctionStatus = commonAuctionSeed.auctionStatus;
     logOk('entrada valida a sala');
     const pdfCatalog = await request(`/subastas/${activeCommon.id}/catalogo`, { token: userA.sessionToken });
     if (!Array.isArray(pdfCatalog.catalogo) || !pdfCatalog.catalogo.length) throw new Error('/subastas/{id}/catalogo no devolvio items');
+    if (pdfCatalog.catalogo.some((item) => !Array.isArray(item.fotos) || item.fotos.length < 6)) {
+      throw new Error('/subastas/{id}/catalogo no devolvio fotos del producto');
+    }
     const pdfCatalogItem = await request(`/subastas/${activeCommon.id}/catalogo/${room.itemId}`, { token: userA.sessionToken });
     if (String(pdfCatalogItem.id) !== String(room.itemId)) throw new Error('/subastas/{id}/catalogo/{itemId} no devolvio item');
     await request(`/subastas/${activeCommon.id}/salir`, { method: 'POST', token: userA.sessionToken });
@@ -984,6 +1237,15 @@ async function main() {
         token: userA.sessionToken,
         body: JSON.stringify({ clienteId: userA.clienteId, amount: Number(activeCommon.currentBid) + 1 })
       }), 'al menos');
+    await expectReject('puja comun mayor al 20 porciento rechazada', () =>
+      request(`/auctions/${activeCommon.id}/bids`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({
+          clienteId: userA.clienteId,
+          amount: Number(activeCommon.currentBid) + Math.ceil(Number(activeCommon.basePrice) * 0.25)
+        })
+      }), 'no puede superar');
 
     const validAmount = Number(activeCommon.currentBid) + Math.ceil(Number(activeCommon.basePrice) * 0.02);
     const bid = await request(`/auctions/${activeCommon.id}/bids`, {
@@ -1010,6 +1272,11 @@ async function main() {
           amount: validAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02)
         })
       }), 'vas primero');
+    const browsingWhileLeading = await request(`/auctions?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
+    if (!Array.isArray(browsingWhileLeading) || browsingWhileLeading.length < 2) {
+      throw new Error('Usuario lider no pudo seguir viendo otras subastas');
+    }
+    logOk('lider puede mirar otras subastas mientras espera');
 
     const rivalAmount = validAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02);
     const rivalBid = await request(`/subastas/${activeCommon.id}/items/${room.itemId}/pujar`, {
@@ -1023,8 +1290,12 @@ async function main() {
     logOk('versus usuario B supera a usuario A');
 
     const outbidNotifications = await request('/notificaciones', { token: userA.sessionToken });
-    if (!outbidNotifications.some((notification) => String(notification.id).startsWith('outbid-'))) {
+    const outbidNotification = outbidNotifications.find((notification) => String(notification.id).startsWith('outbid-'));
+    if (!outbidNotification) {
       throw new Error('Usuario A no recibio notificacion de sobrepuja');
+    }
+    if (outbidNotification.target !== `auction:${activeCommon.id}` || outbidNotification.action !== 'open_auction') {
+      throw new Error('La notificacion de sobrepuja no permite volver a la subasta');
     }
     logOk('usuario superado recibe notificacion');
 
@@ -1069,6 +1340,127 @@ async function main() {
     if (Number(pdfPurchaseDetail.id) !== Number(comebackBid.bid.id)) throw new Error('/usuarios/me/compras/{id} no devolvio detalle');
     await request(`/usuarios/me/compras/${comebackBid.bid.id}/tracking`, { token: userA.sessionToken });
     logOk('compra ganadora se registra como pagada');
+
+    const userPenalty = await verifyGuest(db, await registerGuest(db, 5));
+    await request(`/users/${userPenalty.clienteId}/payments`, {
+      method: 'POST',
+      token: userPenalty.sessionToken,
+      body: JSON.stringify({
+        type: 'tarjeta',
+        amount: 50000,
+        cardHolder: 'qa penalidad',
+        cardNumber: '4111111111111111',
+        expiry: '12/30',
+        cvv: '123'
+      })
+    });
+    const [penaltyAuctionRows] = await db.query(
+      `SELECT s.identificador AS auctionId, s.estado AS auctionStatus, i.identificador AS itemId,
+        i.puja_actual AS currentBid, i.subastado AS subastado
+       FROM subastas s
+       JOIN catalogos c ON c.subasta = s.identificador
+       JOIN items_catalogo i ON i.catalogo = c.identificador
+       WHERE s.categoria = 'comun' AND i.identificador <> ?
+       ORDER BY s.identificador ASC, i.orden_lote ASC
+       LIMIT 1`,
+      [room.itemId]
+    );
+    const penaltyAuctionSeed = penaltyAuctionRows[0];
+    if (!penaltyAuctionSeed) throw new Error('No hay lote comun alternativo para QA de penalidad');
+    touched.extraAuctions = touched.extraAuctions || [];
+    touched.extraAuctions.push({
+      auctionId: penaltyAuctionSeed.auctionId,
+      previousAuctionStatus: penaltyAuctionSeed.auctionStatus
+    });
+    touched.extraItems = touched.extraItems || [];
+    touched.extraItems.push({
+      itemId: penaltyAuctionSeed.itemId,
+      previousBid: penaltyAuctionSeed.currentBid,
+      previousSubastado: penaltyAuctionSeed.subastado
+    });
+    await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [penaltyAuctionSeed.auctionId]);
+    await db.query(
+      `UPDATE items_catalogo
+       SET puja_actual = 0, subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ?`,
+      [penaltyAuctionSeed.itemId]
+    );
+    const penaltyAuctionDetail = await request(`/auctions/${penaltyAuctionSeed.auctionId}`, { token: userPenalty.sessionToken });
+    const penaltyBidAmount = Math.ceil(Number(penaltyAuctionDetail.basePrice) * 0.02);
+    const penaltyBid = await request(`/auctions/${penaltyAuctionSeed.auctionId}/bids`, {
+      method: 'POST',
+      token: userPenalty.sessionToken,
+      body: JSON.stringify({ clienteId: userPenalty.clienteId, amount: penaltyBidAmount })
+    });
+    await db.query(
+      "UPDATE items_catalogo SET timer_vencimiento = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 SECOND) WHERE identificador = ?",
+      [penaltyAuctionSeed.itemId]
+    );
+    await request(`/auctions/${penaltyAuctionSeed.auctionId}?clienteId=${userPenalty.clienteId}`, { token: userPenalty.sessionToken });
+    await expectReject('falta de fondos genera multa', () =>
+      request(`/usuarios/me/compras/${penaltyBid.bid.id}/confirmar-pago`, {
+        method: 'POST',
+        token: userPenalty.sessionToken,
+        body: JSON.stringify({ direccionEnvio: 'Av Sin Fondos 123' })
+      }), 'fondos insuficientes');
+    const penalties = await request('/usuarios/me/penalidades', { token: userPenalty.sessionToken });
+    const fundsPenalty = penalties.find((penalty) => penalty.type === 'falta_fondos' && penalty.status === 'activa');
+    if (!fundsPenalty || Number(fundsPenalty.amount) !== Math.round(penaltyBidAmount * 0.1 * 100) / 100) {
+      throw new Error('La multa por falta de fondos no quedo activa con el 10 porciento');
+    }
+    const restrictedAccount = await request('/usuarios/me/estado-cuenta', { token: userPenalty.sessionToken });
+    if (restrictedAccount.estado !== 'restringida') throw new Error('La cuenta con penalidad no quedo restringida');
+    await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [activeCommon.id]);
+    await db.query(
+      `UPDATE items_catalogo
+       SET subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
+         cierre_estado = 'esperando_puja', cierre_motivo = NULL
+       WHERE identificador = ?`,
+      [room.itemId]
+    );
+    await expectReject('penalidad bloquea entrar a otra subasta', () =>
+      request(`/auctions/${activeCommon.id}/enter`, {
+        method: 'POST',
+        token: userPenalty.sessionToken,
+        body: JSON.stringify({ clienteId: userPenalty.clienteId })
+      }), 'penalidades');
+    await expectReject('presentar fondos insuficientes rechazado', () =>
+      request(`/usuarios/me/penalidades/${fundsPenalty.id}/presentar-fondos`, {
+        method: 'POST',
+        token: userPenalty.sessionToken
+      }), 'no cubre');
+    await request(`/users/${userPenalty.clienteId}/payments`, {
+      method: 'POST',
+      token: userPenalty.sessionToken,
+      body: JSON.stringify({
+        type: 'tarjeta',
+        amount: 100000000,
+        cardHolder: 'qa penalidad fondos',
+        cardNumber: '4111111111111111',
+        expiry: '12/30',
+        cvv: '123'
+      })
+    });
+    let penaltyState = await request(`/usuarios/me/penalidades/${fundsPenalty.id}/pagar`, {
+      method: 'POST',
+      token: userPenalty.sessionToken
+    });
+    if (!penaltyState.some((penalty) => Number(penalty.id) === Number(fundsPenalty.id) && penalty.status === 'activa')) {
+      throw new Error('Pagar multa sin presentar fondos no debe cerrar la penalidad');
+    }
+    penaltyState = await request(`/usuarios/me/penalidades/${fundsPenalty.id}/presentar-fondos`, {
+      method: 'POST',
+      token: userPenalty.sessionToken
+    });
+    if (!penaltyState.some((penalty) => Number(penalty.id) === Number(fundsPenalty.id) && penalty.status === 'pagada')) {
+      throw new Error('Presentar fondos tras pagar multa no cerro la penalidad');
+    }
+    const recoveredPurchases = await request(`/users/${userPenalty.clienteId}/purchases`, { token: userPenalty.sessionToken });
+    if (!recoveredPurchases.some((purchase) => Number(purchase.id) === Number(penaltyBid.bid.id) && purchase.paymentStatus === 'pagada')) {
+      throw new Error('La compra con penalidad resuelta no quedo pagada');
+    }
+    logOk('penalidad falta fondos se resuelve con multa y fondos');
 
     const pdfAccountState = await request('/usuarios/me/estado-cuenta', { token: userA.sessionToken });
     if (!pdfAccountState.estado) throw new Error('/usuarios/me/estado-cuenta no devolvio estado');
