@@ -14,6 +14,20 @@ function Require-Command {
   }
 }
 
+function Resolve-NgrokPath {
+  $command = Get-Command ngrok -ErrorAction SilentlyContinue
+  if ($command) {
+    return $command.Source
+  }
+
+  $wingetPath = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe\ngrok.exe"
+  if (Test-Path $wingetPath) {
+    return $wingetPath
+  }
+
+  throw "No se encontro 'ngrok'. Instalalo con: winget install --id Ngrok.Ngrok -e"
+}
+
 function Wait-Http {
   param(
     [string]$Url,
@@ -107,8 +121,8 @@ Push-Location (Resolve-Path "$PSScriptRoot\..")
 
 try {
   Require-Command docker
-  Require-Command ngrok
   Require-Command npm
+  $ngrokPath = Resolve-NgrokPath
 
   Write-Host "Levantando MySQL con Docker Compose..."
   docker compose up -d $ComposeService
@@ -117,7 +131,7 @@ try {
   Invoke-WithRetry -Label "MySQL/db:init" -Command { npm run db:init }
 
   Write-Host "Iniciando ngrok en puerto $ApiPort..."
-  $ngrokProcess = Start-Process -FilePath "ngrok" `
+  $ngrokProcess = Start-Process -FilePath $ngrokPath `
     -ArgumentList @("http", $ApiPort.ToString(), "--log=stdout") `
     -WindowStyle Hidden `
     -PassThru
