@@ -13,6 +13,8 @@ const app = express();
 const SESSION_DAYS = 7;
 const BID_TIMER_SECONDS = 60;
 const FIRST_BID_TIMER_SECONDS = 3 * 60;
+const DEMO_LIVE_AUCTION_IDS = [11, 12, 13];
+const DEMO_FIRST_BID_TIMER_SECONDS = 45 * 60;
 const COMPANY_CLIENT_ID = 4;
 const SHIPPING_COST = 25000;
 const MAX_GUARANTEE_AMOUNT = 999999999999.99;
@@ -1933,12 +1935,15 @@ async function ensureActiveAuctionItem(auctionId) {
   }
 
   if (!item.timerExpiresAt) {
+    const firstBidTimerSeconds = DEMO_LIVE_AUCTION_IDS.includes(Number(auctionId))
+      ? DEMO_FIRST_BID_TIMER_SECONDS
+      : FIRST_BID_TIMER_SECONDS;
     await run(
       `UPDATE items_catalogo
        SET timer_inicio = UTC_TIMESTAMP(), timer_vencimiento = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND),
          cierre_estado = 'esperando_puja', cierre_motivo = NULL
        WHERE identificador = ? AND cierre_estado <> 'finalizada' AND timer_vencimiento IS NULL`,
-      [FIRST_BID_TIMER_SECONDS, item.itemId]
+      [firstBidTimerSeconds, item.itemId]
     );
   }
 
@@ -1953,6 +1958,7 @@ async function ensureOpenAuctionItems() {
 }
 
 async function settleExpiredAuctionTimers() {
+  await restoreClosedDemoAuctions();
   await ensureOpenAuctionItems();
   const rows = await query(
     `SELECT i.identificador AS itemId
@@ -1970,6 +1976,38 @@ async function settleExpiredAuctionTimers() {
   for (const row of rows) {
     await finalizeAuctionItem(row.itemId);
   }
+}
+
+async function restoreClosedDemoAuctions() {
+  const placeholders = DEMO_LIVE_AUCTION_IDS.map(() => '?').join(', ');
+  const closedRooms = await query(
+    `SELECT identificador AS id
+     FROM subastas
+     WHERE identificador IN (${placeholders}) AND estado = 'cerrada'`,
+    DEMO_LIVE_AUCTION_IDS
+  );
+  const roomIds = closedRooms.map((room) => Number(room.id));
+  if (!roomIds.length) return;
+
+  const roomPlaceholders = roomIds.map(() => '?').join(', ');
+  await run(
+    `UPDATE subastas
+     SET estado = 'abierta'
+     WHERE identificador IN (${roomPlaceholders})`,
+    roomIds
+  );
+  await run(
+    `UPDATE items_catalogo i
+     JOIN catalogos c ON c.identificador = i.catalogo
+     SET i.subastado = 'no',
+       i.puja_actual = 0,
+       i.timer_inicio = NULL,
+       i.timer_vencimiento = NULL,
+       i.cierre_estado = 'esperando_puja',
+       i.cierre_motivo = NULL
+     WHERE c.subasta IN (${roomPlaceholders})`,
+    roomIds
+  );
 }
 
 async function finalizeAuctionItem(itemId) {
