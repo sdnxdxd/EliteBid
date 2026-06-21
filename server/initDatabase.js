@@ -43,6 +43,11 @@ async function migrateSecuritySchema() {
     "ALTER TABLE personas ADD COLUMN tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni' AFTER identificador"
   );
   await run("ALTER TABLE personas MODIFY tipo_documento ENUM('dni', 'pasaporte') DEFAULT 'dni'");
+  await addColumnIfMissing(
+    'personas',
+    'foto',
+    'ALTER TABLE personas ADD COLUMN foto LONGBLOB AFTER estado'
+  );
   await run('ALTER TABLE personas MODIFY foto_uri MEDIUMTEXT');
   await run('ALTER TABLE documentos_identidad MODIFY frente_uri MEDIUMTEXT NOT NULL');
   await run('ALTER TABLE documentos_identidad MODIFY dorso_uri MEDIUMTEXT NOT NULL');

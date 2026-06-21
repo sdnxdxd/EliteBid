@@ -14,6 +14,9 @@ Generados con `npm run qa:seed`.
 | Cliente con multa abonada pero fondos pendientes. | `demo.elitebid.cliente.penalidad.multa@elitebid.test` | `Demo!2203` | cliente / activo / comun |
 | Cliente con penalidad por falta de fondos ya resuelta. | `demo.elitebid.cliente.penalidad.pagada@elitebid.test` | `Demo!2203` | cliente / activo / comun |
 | Cliente con metricas para categoria plata. | `demo.elitebid.cliente.plata@elitebid.test` | `Demo!2203` | cliente / activo / plata |
+| Cliente categoria especial con cuenta bancaria verificada. | `demo.elitebid.cliente.especial@elitebid.test` | `Demo!2203` | cliente / activo / especial |
+| Cliente categoria oro con cheque certificado verificado. | `demo.elitebid.cliente.oro@elitebid.test` | `Demo!2203` | cliente / activo / oro |
+| Cliente categoria platino con medio de pago internacional USD. | `demo.elitebid.cliente.platino@elitebid.test` | `Demo!2203` | cliente / activo / platino |
 | Cliente con puja ganadora pendiente de registrar compra. | `demo.elitebid.cliente.compra@elitebid.test` | `Demo!2203` | cliente / activo / comun |
 | Cliente con solicitudes de lotes pendientes y productos con imagenes distintas. | `demo.elitebid.cliente.lote@elitebid.test` | `Demo!2203` | cliente / activo / comun |
 

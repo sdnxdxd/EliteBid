@@ -681,6 +681,33 @@ async function restoreTouchedItem(db, touchedItem) {
   );
 }
 
+async function resetAuctionForQa(db, auctionId) {
+  await db.query(
+    `DELETE r FROM registro_de_subasta r
+     WHERE r.subasta = ?`,
+    [auctionId]
+  );
+  await db.query(
+    `DELETE p FROM pujos p
+     JOIN items_catalogo i ON i.identificador = p.item
+     JOIN catalogos c ON c.identificador = i.catalogo
+     WHERE c.subasta = ?`,
+    [auctionId]
+  );
+  await db.query(
+    `UPDATE items_catalogo i
+     JOIN catalogos c ON c.identificador = i.catalogo
+     SET i.puja_actual = 0,
+       i.subastado = 'no',
+       i.timer_inicio = NULL,
+       i.timer_vencimiento = NULL,
+       i.cierre_estado = 'esperando_puja',
+       i.cierre_motivo = NULL
+     WHERE c.subasta = ?`,
+    [auctionId]
+  );
+}
+
 async function resetAutoIncrement(db, table, primaryKey) {
   const [rows] = await db.query(`SELECT COALESCE(MAX(${primaryKey}), 0) + 1 AS nextId FROM ${table}`);
   const nextId = Math.max(1, Number(rows[0]?.nextId || 1));
@@ -1278,19 +1305,13 @@ async function main() {
        JOIN catalogos c ON c.subasta = s.identificador
        JOIN items_catalogo i ON i.catalogo = c.identificador
        WHERE s.categoria = 'comun'
-       ORDER BY s.identificador ASC, i.orden_lote ASC
+       ORDER BY CASE WHEN s.identificador = 90001 THEN 0 ELSE 1 END, s.identificador ASC, i.orden_lote ASC
        LIMIT 1`
     );
     const commonAuctionSeed = commonAuctionRows[0];
     if (!commonAuctionSeed) throw new Error('No hay subasta comun para QA');
+    await resetAuctionForQa(db, commonAuctionSeed.auctionId);
     await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [commonAuctionSeed.auctionId]);
-    await db.query(
-      `UPDATE items_catalogo
-       SET puja_actual = 0, subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
-         cierre_estado = 'esperando_puja', cierre_motivo = NULL
-       WHERE identificador = ?`,
-      [commonAuctionSeed.itemId]
-    );
 
     const auctions = await request(`/auctions?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
     const activeCommon = auctions.find((auction) => Number(auction.id) === Number(commonAuctionSeed.auctionId));

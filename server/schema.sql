@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS personas (
   nombre VARCHAR(160) NOT NULL,
   direccion VARCHAR(255),
   estado ENUM('activo', 'inactivo') DEFAULT 'activo',
+  foto LONGBLOB,
   foto_uri MEDIUMTEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

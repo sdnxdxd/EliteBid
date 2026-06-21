@@ -83,6 +83,24 @@ const scenarios = [
     description: 'Cliente con metricas para categoria plata.'
   },
   {
+    key: 'clientSpecial',
+    email: `demo.elitebid.cliente.especial@${DEMO_DOMAIN}`,
+    name: 'Cliente Especial',
+    description: 'Cliente categoria especial con cuenta bancaria verificada.'
+  },
+  {
+    key: 'clientGold',
+    email: `demo.elitebid.cliente.oro@${DEMO_DOMAIN}`,
+    name: 'Cliente Oro',
+    description: 'Cliente categoria oro con cheque certificado verificado.'
+  },
+  {
+    key: 'clientPlatinum',
+    email: `demo.elitebid.cliente.platino@${DEMO_DOMAIN}`,
+    name: 'Cliente Platino',
+    description: 'Cliente categoria platino con medio de pago internacional USD.'
+  },
+  {
     key: 'clientPurchase',
     email: `demo.elitebid.cliente.compra@${DEMO_DOMAIN}`,
     name: 'Cliente Compra',
@@ -224,26 +242,62 @@ async function verifyUser(db, scenario, index) {
 }
 
 async function addPayment(db, clienteId, type = 'tarjeta') {
+  const token = await getSessionTokenForClient(db, clienteId);
+
+  if (type === 'cuenta') {
+    await request(`/users/${clienteId}/payments`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({
+        type: 'cuenta',
+        amount: 2500000,
+        currency: 'ARS',
+        bank: 'Banco Galicia',
+        accountType: 'Cuenta Corriente',
+        cbu: '2850590940090418135201',
+        alias: `demo.${clienteId}.elitebid`
+      })
+    });
+    return;
+  }
+
   if (type === 'cheque') {
-    await db.query(
-      `INSERT INTO medios_pago (cliente, tipo, detalle, moneda, monto_garantia, verificado)
-       VALUES (?, 'cheque', ?, 'ARS', 150000, 'no')`,
-      [
-        clienteId,
-        JSON.stringify({
-          bank: 'Banco Demo',
-          checkImageUri: 'file:///demo/cheque.jpg',
-          checkNumber: '889900',
-          issueDate: '2026-06-05'
-        })
-      ]
-    );
+    await request(`/users/${clienteId}/payments`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({
+        type: 'cheque',
+        amount: 3500000,
+        currency: 'ARS',
+        bank: 'Banco Nacion',
+        checkNumber: `88${String(clienteId).padStart(6, '0')}`,
+        issueDate: '2026-06-05',
+        checkImageUri: 'file:///demo/cheque-certificado.jpg'
+      })
+    });
+    return;
+  }
+
+  if (type === 'tarjeta_usd') {
+    await request(`/users/${clienteId}/payments`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({
+        type: 'tarjeta',
+        amount: 250000,
+        currency: 'USD',
+        cardHolder: 'Demo Internacional',
+        cardNumber: '5555555555554444',
+        expiry: '12/30',
+        cvv: '123'
+      })
+    });
     return;
   }
 
   await request(`/users/${clienteId}/payments`, {
     method: 'POST',
-    token: await getSessionTokenForClient(db, clienteId),
+    token,
     body: JSON.stringify({
       type: 'tarjeta',
       amount: 100000,
@@ -253,6 +307,10 @@ async function addPayment(db, clienteId, type = 'tarjeta') {
       cvv: '123'
     })
   });
+}
+
+async function setClientCategory(db, clienteId, category) {
+  await db.query('UPDATE clientes SET categoria = ? WHERE identificador = ?', [category, clienteId]);
 }
 
 async function getSessionTokenForClient(db, clienteId) {
@@ -436,6 +494,150 @@ async function addLot(db, clienteId, options = {}) {
   }
 }
 
+async function seedDemoAuctions(db) {
+  const auctions = [
+    {
+      id: 90001,
+      title: 'QA Comun USD - Arte Grafico Accesible',
+      date: '2026-09-10',
+      time: '18:00',
+      status: 'programada',
+      category: 'comun',
+      currency: 'USD',
+      location: 'Sala QA Retiro',
+      image: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?auto=format&fit=crop&w=900&q=80',
+      products: [
+        { title: 'Serigrafia firmada QA', basePrice: 300, image: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?auto=format&fit=crop&w=900&q=80' },
+        { title: 'Grabado numerado QA', basePrice: 180, image: 'https://images.unsplash.com/photo-1579783901586-d88db74b4fe4?auto=format&fit=crop&w=900&q=80' }
+      ]
+    },
+    {
+      id: 90002,
+      title: 'QA Especial ARS - Audio Vintage',
+      date: '2026-09-12',
+      time: '19:00',
+      status: 'programada',
+      category: 'especial',
+      currency: 'ARS',
+      location: 'Sala QA Palermo',
+      image: 'https://images.unsplash.com/photo-1545454675-3531b543be5d?auto=format&fit=crop&w=900&q=80',
+      products: [
+        { title: 'Amplificador valvular QA', basePrice: 600000, image: 'https://images.unsplash.com/photo-1545454675-3531b543be5d?auto=format&fit=crop&w=900&q=80' },
+        { title: 'Bandeja giradiscos QA', basePrice: 350000, image: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?auto=format&fit=crop&w=900&q=80' }
+      ]
+    },
+    {
+      id: 90003,
+      title: 'QA Plata ARS - Diseno Argentino',
+      date: '2026-09-14',
+      time: '20:00',
+      status: 'programada',
+      category: 'plata',
+      currency: 'ARS',
+      location: 'Sala QA Norte',
+      image: 'https://images.unsplash.com/photo-1618220179428-22790b461013?auto=format&fit=crop&w=900&q=80',
+      products: [
+        { title: 'Silla de autor QA', basePrice: 900000, image: 'https://images.unsplash.com/photo-1618220179428-22790b461013?auto=format&fit=crop&w=900&q=80' },
+        { title: 'Lampara industrial QA', basePrice: 420000, image: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=900&q=80' }
+      ]
+    },
+    {
+      id: 90004,
+      title: 'QA Oro USD - Joyeria Certificada',
+      date: '2026-09-16',
+      time: '20:30',
+      status: 'programada',
+      category: 'oro',
+      currency: 'USD',
+      location: 'Salon QA Alvear',
+      image: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=900&q=80',
+      products: [
+        { title: 'Anillo art deco QA', basePrice: 12000, image: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=900&q=80' },
+        { title: 'Collar perlas QA', basePrice: 8500, image: 'https://images.unsplash.com/photo-1611085583191-a3b181a88401?auto=format&fit=crop&w=900&q=80' }
+      ]
+    },
+    {
+      id: 90005,
+      title: 'QA Platino USD - Automovilismo',
+      date: '2026-09-18',
+      time: '21:00',
+      status: 'programada',
+      category: 'platino',
+      currency: 'USD',
+      location: 'Hangar QA San Fernando',
+      image: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=900&q=80',
+      products: [
+        { title: 'Coupe clasico QA', basePrice: 90000, image: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=900&q=80' },
+        { title: 'Cronografo competicion QA', basePrice: 9500, image: 'https://images.unsplash.com/photo-1524805444758-089113d48a6d?auto=format&fit=crop&w=900&q=80' }
+      ]
+    }
+  ];
+
+  for (const auction of auctions) {
+    await db.query(
+      `INSERT INTO subastas (
+        identificador, titulo, fecha, hora, estado, subastador, ubicacion, capacidad_asistentes,
+        tiene_deposito, seguridad_propia, categoria, moneda, imagen_uri
+      ) VALUES (?, ?, ?, ?, ?, 2, ?, 120, 'si', 'si', ?, ?, ?)
+      ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), fecha = VALUES(fecha), hora = VALUES(hora),
+        estado = VALUES(estado), ubicacion = VALUES(ubicacion), categoria = VALUES(categoria),
+        moneda = VALUES(moneda), imagen_uri = VALUES(imagen_uri)`,
+      [
+        auction.id,
+        auction.title,
+        auction.date,
+        auction.time,
+        auction.status,
+        auction.location,
+        auction.category,
+        auction.currency,
+        auction.image
+      ]
+    );
+    await db.query(
+      `INSERT INTO catalogos (identificador, descripcion, subasta, responsable)
+       VALUES (?, ?, ?, 2)
+       ON DUPLICATE KEY UPDATE descripcion = VALUES(descripcion), subasta = VALUES(subasta)`,
+      [auction.id, `Catalogo ${auction.title}`, auction.id]
+    );
+
+    for (const [index, product] of auction.products.entries()) {
+      const productId = auction.id * 10 + index + 1;
+      const itemId = auction.id * 10 + index + 1;
+      await db.query(
+        `INSERT INTO productos (
+          identificador, fecha, disponible, descripcion_catalogo, descripcion_completa, revisor, duenio, seguro, imagen_uri
+        ) VALUES (?, ?, 'si', ?, ?, 2, 3, NULL, ?)
+        ON DUPLICATE KEY UPDATE fecha = VALUES(fecha), disponible = VALUES(disponible),
+          descripcion_catalogo = VALUES(descripcion_catalogo), descripcion_completa = VALUES(descripcion_completa),
+          imagen_uri = VALUES(imagen_uri)`,
+        [productId, auction.date, product.title, `${product.title}. Fixture QA con procedencia y fotos completas.`, product.image]
+      );
+      await db.query(
+        `INSERT INTO items_catalogo (
+          identificador, catalogo, orden_lote, producto, precio_base, comision, subastado, puja_actual,
+          timer_inicio, timer_vencimiento, cierre_estado, cierre_motivo
+        ) VALUES (?, ?, ?, ?, ?, ?, 'no', 0, NULL, NULL, 'esperando_puja', NULL)
+        ON DUPLICATE KEY UPDATE catalogo = VALUES(catalogo), orden_lote = VALUES(orden_lote),
+          producto = VALUES(producto), precio_base = VALUES(precio_base), comision = VALUES(comision),
+          subastado = 'no', puja_actual = 0, timer_inicio = NULL, timer_vencimiento = NULL,
+          cierre_estado = 'esperando_puja', cierre_motivo = NULL`,
+        [itemId, auction.id, index + 1, productId, product.basePrice, Number(product.basePrice) * 0.12]
+      );
+      for (let order = 1; order <= 6; order += 1) {
+        const uri = `${product.image}${product.image.includes('?') ? '&' : '?'}qa_photo=${order}`;
+        await db.query(
+          `INSERT INTO fotos (producto, uri, orden)
+           SELECT ?, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM fotos WHERE producto = ? AND orden = ?)`,
+          [productId, uri, order, productId, order]
+        );
+        await db.query('UPDATE fotos SET uri = ? WHERE producto = ? AND orden = ?', [uri, productId, order]);
+      }
+    }
+  }
+}
+
 async function writeSummary(users) {
   const fs = require('fs/promises');
   const lines = [
@@ -524,14 +726,30 @@ async function main() {
     await addPayment(db, silver.clienteId);
     await addDemoBids(db, silver.clienteId, { total: 5, wins: 1, amount: 350000 });
     await request(`/users/${silver.clienteId}/summary`, { token: silver.sessionToken });
+    await setClientCategory(db, silver.clienteId, 'plata');
     users.push({ ...silver, categoria: 'plata', payment: 'tarjeta' });
 
-    const purchase = await verifyUser(db, byKey.clientPurchase, 11);
+    const special = await verifyUser(db, byKey.clientSpecial, 11);
+    await addPayment(db, special.clienteId, 'cuenta');
+    await setClientCategory(db, special.clienteId, 'especial');
+    users.push({ ...special, categoria: 'especial', payment: 'cuenta' });
+
+    const gold = await verifyUser(db, byKey.clientGold, 12);
+    await addPayment(db, gold.clienteId, 'cheque');
+    await setClientCategory(db, gold.clienteId, 'oro');
+    users.push({ ...gold, categoria: 'oro', payment: 'cheque' });
+
+    const platinum = await verifyUser(db, byKey.clientPlatinum, 13);
+    await addPayment(db, platinum.clienteId, 'tarjeta_usd');
+    await setClientCategory(db, platinum.clienteId, 'platino');
+    users.push({ ...platinum, categoria: 'platino', payment: 'tarjeta_usd' });
+
+    const purchase = await verifyUser(db, byKey.clientPurchase, 14);
     await addPayment(db, purchase.clienteId);
     await addDemoBids(db, purchase.clienteId, { total: 1, wins: 1, amount: 420000 });
     users.push({ ...purchase, payment: 'tarjeta', purchase: true });
 
-    const lot = await verifyUser(db, byKey.clientLot, 12);
+    const lot = await verifyUser(db, byKey.clientLot, 15);
     await addPayment(db, lot.clienteId);
     await addLot(db, lot.clienteId);
     await addLot(db, lot.clienteId, {
@@ -562,6 +780,8 @@ async function main() {
       ]
     });
     users.push({ ...lot, payment: 'tarjeta', lot: true });
+
+    await seedDemoAuctions(db);
 
     await writeSummary(users);
     console.log('Datos demo creados:');
