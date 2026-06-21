@@ -11,10 +11,10 @@ require('dotenv').config();
 
 const app = express();
 const SESSION_DAYS = 7;
-const BID_TIMER_SECONDS = 60;
-const FIRST_BID_TIMER_SECONDS = 3 * 60;
+const BID_TIMER_SECONDS = 20;
+const FIRST_BID_TIMER_SECONDS = 60;
 const DEMO_LIVE_AUCTION_IDS = [11, 12, 13];
-const DEMO_FIRST_BID_TIMER_SECONDS = 45 * 60;
+const DEMO_FIRST_BID_TIMER_SECONDS = 120;
 const COMPANY_CLIENT_ID = 4;
 const SHIPPING_COST = 25000;
 const MAX_GUARANTEE_AMOUNT = 999999999999.99;
@@ -1063,7 +1063,12 @@ app.post('/api/subastas/:auctionId/ingresar', wrap(async (req, res) => {
 }));
 
 app.post('/api/subastas/:auctionId/salir', wrap(async (req, res) => {
-  await requireAuthenticatedClient(req);
+  const viewer = await requireAuthenticatedClient(req);
+  const auctionId = parsePositiveInt(req.params.auctionId, 'Subasta invalida.');
+  const activeLeadingBid = await getActiveLeadingBid(viewer.clienteId);
+  if (activeLeadingBid && Number(activeLeadingBid.auctionId) === Number(auctionId)) {
+    throw new Error('No podes salir de la sala mientras tu puja esta liderando.');
+  }
   res.json({ ok: true, message: 'Salida registrada.' });
 }));
 
@@ -1710,7 +1715,8 @@ async function getAuctionRows(viewer = null) {
     `SELECT s.identificador AS id, s.titulo AS title, DATE_FORMAT(s.fecha, '%Y-%m-%d') AS date,
       s.hora AS time, s.estado AS status, s.categoria AS category, s.moneda AS currency,
       s.ubicacion AS location, COALESCE(p.imagen_uri, s.imagen_uri) AS imageUrl,
-      p.descripcion_catalogo AS description, i.precio_base AS basePrice, i.puja_actual AS currentBid,
+      p.descripcion_catalogo AS description, i.precio_base AS basePrice,
+      CASE WHEN i.puja_actual > 0 THEN i.puja_actual ELSE i.precio_base END AS currentBid,
       i.cierre_estado AS closureStatus,
       GREATEST(0, TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), i.timer_vencimiento)) AS timerSecondsRemaining
      FROM subastas s
@@ -1726,6 +1732,7 @@ async function getAuctionRows(viewer = null) {
      ) catalogo_actual ON catalogo_actual.catalogo = c.identificador
      JOIN items_catalogo i ON i.catalogo = c.identificador AND i.orden_lote = catalogo_actual.orden_actual
      JOIN productos p ON p.identificador = i.producto
+     ${restrictedCatalog ? "WHERE s.estado = 'programada'" : ''}
      ORDER BY CASE s.estado WHEN 'abierta' THEN 0 WHEN 'programada' THEN 1 ELSE 2 END, s.fecha ASC`
   );
 
@@ -1745,7 +1752,7 @@ async function getAuctionDetail(auctionId, clienteId) {
       (SELECT GROUP_CONCAT(f.uri ORDER BY f.orden SEPARATOR '\n') FROM fotos f WHERE f.producto = p.identificador) AS photoUrls,
       p.descripcion_catalogo AS itemTitle, p.descripcion_completa AS fullDescription, p.identificador AS productId,
       i.identificador AS itemId, i.precio_base AS basePrice, i.comision AS commission,
-      i.puja_actual AS currentBid, i.subastado AS sold,
+      CASE WHEN i.puja_actual > 0 THEN i.puja_actual ELSE i.precio_base END AS currentBid, i.subastado AS sold,
       i.orden_lote AS lotPosition,
       (SELECT COUNT(*) FROM items_catalogo lot_items WHERE lot_items.catalogo = c.identificador) AS lotItemCount,
       i.timer_inicio AS timerStartedAt, i.timer_vencimiento AS timerExpiresAt,
@@ -1781,6 +1788,7 @@ async function getAuctionDetail(auctionId, clienteId) {
     catalog: await getAuctionCatalogLots(auctionId, viewer),
     bidFeed: restrictedCatalog ? [] : await getAuctionBidFeed(auction.itemId),
     closure: restrictedCatalog ? null : await getAuctionClosure(auction.itemId, clienteId),
+    lockedPaymentMethodId: restrictedCatalog ? null : await getAuctionPaymentLock(clienteId, auctionId),
     recentWin: restrictedCatalog ? null : await getRecentAuctionWin(auctionId, clienteId),
     isFavorite: restrictedCatalog ? false : await isFavoriteAuction(clienteId, auctionId),
     eligibility: {
@@ -1799,7 +1807,8 @@ async function getAuctionCatalogLots(auctionId, viewer = null) {
       p.descripcion_catalogo AS description, p.descripcion_completa AS fullDescription,
       p.identificador AS productId, p.imagen_uri AS imageUrl,
       (SELECT GROUP_CONCAT(f.uri ORDER BY f.orden SEPARATOR '\n') FROM fotos f WHERE f.producto = p.identificador) AS photoUrls,
-      i.identificador AS itemId, i.precio_base AS basePrice, i.puja_actual AS currentBid,
+      i.identificador AS itemId, i.precio_base AS basePrice,
+      CASE WHEN i.puja_actual > 0 THEN i.puja_actual ELSE i.precio_base END AS currentBid,
       i.orden_lote AS lotPosition, i.comision AS commission, i.subastado AS sold, i.cierre_estado AS closureStatus,
       i.timer_inicio AS timerStartedAt, i.timer_vencimiento AS timerExpiresAt
      FROM subastas s
@@ -1878,6 +1887,20 @@ async function getAuctionClosure(itemId, clienteId = null) {
         }
       : null
   };
+}
+
+async function getAuctionPaymentLock(clienteId, auctionId) {
+  if (!clienteId || !auctionId) return null;
+  const lock = await first(
+    `SELECT p.medio_pago AS paymentMethodId
+     FROM pujos p
+     JOIN asistentes a ON a.identificador = p.asistente
+     WHERE a.cliente = ? AND a.subasta = ? AND p.medio_pago IS NOT NULL
+     ORDER BY p.identificador ASC
+     LIMIT 1`,
+    [clienteId, auctionId]
+  );
+  return lock?.paymentMethodId ?? null;
 }
 
 async function resolveBidPayment(clienteId, paymentMethodId, amount) {
@@ -2175,7 +2198,15 @@ async function placeAuctionBid(clienteId, auctionId, amount, paymentMethodId = n
     throw new Error(`Para categorias comun, especial y plata, el monto no puede superar ${formatMoney(maxBid)}.`);
   }
 
-  const resolvedPaymentId = await resolveBidPayment(clienteId, paymentMethodId, amount);
+  const lockedPaymentMethodId = await getAuctionPaymentLock(clienteId, auctionId);
+  if (
+    lockedPaymentMethodId &&
+    paymentMethodId &&
+    Number(parsePositiveInt(paymentMethodId, 'Medio de pago invalido.')) !== Number(lockedPaymentMethodId)
+  ) {
+    throw new Error('Ya ingresaste a esta subasta con otro medio de pago. Debes seguir pujando con el mismo.');
+  }
+  const resolvedPaymentId = await resolveBidPayment(clienteId, lockedPaymentMethodId || paymentMethodId, amount);
   const assistantId = await ensureAssistant(clienteId, auctionId);
   await run('UPDATE pujos SET ganador = ? WHERE item = ?', ['no', detail.itemId]);
   const result = await run('INSERT INTO pujos (asistente, item, medio_pago, importe, ganador) VALUES (?, ?, ?, ?, ?)', [

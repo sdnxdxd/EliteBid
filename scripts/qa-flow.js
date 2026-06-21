@@ -1109,7 +1109,7 @@ async function main() {
     await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [goldAuctionSeed.auctionId]);
     await db.query(
       `UPDATE items_catalogo
-       SET subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
+       SET puja_actual = 0, subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
          cierre_estado = 'esperando_puja', cierre_motivo = NULL
        WHERE identificador = ?`,
       [goldAuctionSeed.itemId]
@@ -1286,7 +1286,7 @@ async function main() {
     await db.query("UPDATE subastas SET estado = 'abierta' WHERE identificador = ?", [commonAuctionSeed.auctionId]);
     await db.query(
       `UPDATE items_catalogo
-       SET subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
+       SET puja_actual = 0, subastado = 'no', timer_inicio = NULL, timer_vencimiento = NULL,
          cierre_estado = 'esperando_puja', cierre_motivo = NULL
        WHERE identificador = ?`,
       [commonAuctionSeed.itemId]
@@ -1295,6 +1295,9 @@ async function main() {
     const auctions = await request(`/auctions?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
     const activeCommon = auctions.find((auction) => Number(auction.id) === Number(commonAuctionSeed.auctionId));
     if (!activeCommon) throw new Error('No hay subasta comun abierta para QA');
+    if (Number(activeCommon.currentBid) !== Number(activeCommon.basePrice)) {
+      throw new Error('La subasta sin pujas debe mostrar el precio base como puja actual');
+    }
     const registeredDetail = await request(`/auctions/${activeCommon.id}`, { token: userA.sessionToken });
     if (!Array.isArray(registeredDetail.catalog) || registeredDetail.catalog.length < 2) {
       throw new Error('La subasta registrada no devolvio catalogo con productos');
@@ -1378,6 +1381,7 @@ async function main() {
       body: JSON.stringify({ clienteId: userA.clienteId, amount: validAmount })
     });
     if (Number(bid.auction.currentBid) !== validAmount) throw new Error('La puja valida no actualizo la subasta');
+    if (!bid.auction.lockedPaymentMethodId) throw new Error('La primera puja no fijo el medio de pago de la sala');
     logOk('puja valida actualiza subasta');
     const pdfBids = await request(`/subastas/${activeCommon.id}/items/${room.itemId}/pujas`, { token: userA.sessionToken });
     if (!Array.isArray(pdfBids) || !pdfBids.length) throw new Error('/subastas/{id}/items/{itemId}/pujas no devolvio historial');
@@ -1396,6 +1400,11 @@ async function main() {
           amount: validAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02)
         })
       }), 'vas primero');
+    await expectReject('lider activo no puede salir de la sala', () =>
+      request(`/subastas/${activeCommon.id}/salir`, {
+        method: 'POST',
+        token: userA.sessionToken
+      }), 'salir');
     const browsingWhileLeading = await request(`/auctions?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
     if (!Array.isArray(browsingWhileLeading) || browsingWhileLeading.length < 2) {
       throw new Error('Usuario lider no pudo seguir viendo otras subastas');
@@ -1432,6 +1441,22 @@ async function main() {
     logOk('usuario A ve nuevo precio actualizado');
 
     const comebackAmount = rivalAmount + Math.ceil(Number(activeCommon.basePrice) * 0.02);
+    const lockedPaymentId = Number(refreshedDetail.lockedPaymentMethodId);
+    const otherPayment = userAPayments.find((payment) => Number(payment.id) !== lockedPaymentId);
+    if (otherPayment) {
+      await expectReject('no puede cambiar metodo de pago dentro de la subasta', () =>
+        request(`/auctions/${activeCommon.id}/bids`, {
+          method: 'POST',
+          token: userA.sessionToken,
+          body: JSON.stringify({
+            clienteId: userA.clienteId,
+            amount: comebackAmount,
+            paymentMethodId: otherPayment.id
+          })
+        }), 'mismo');
+    }
+    const beforePaymentRows = await request(`/users/${userA.clienteId}/payments`, { token: userA.sessionToken });
+    const beforeLockedPayment = beforePaymentRows.find((payment) => Number(payment.id) === lockedPaymentId);
     const comebackBid = await request(`/auctions/${activeCommon.id}/bids`, {
       method: 'POST',
       token: userA.sessionToken,
@@ -1446,11 +1471,24 @@ async function main() {
       "UPDATE items_catalogo SET timer_vencimiento = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 SECOND) WHERE identificador = ?",
       [room.itemId]
     );
-    await request(`/auctions/${activeCommon.id}?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
+    const closedDetail = await request(`/auctions/${activeCommon.id}?clienteId=${userA.clienteId}`, { token: userA.sessionToken });
+    if (!closedDetail.recentWin || closedDetail.recentWin.paymentStatus !== 'pagada') {
+      throw new Error('Al ganar no se informo la adjudicacion pagada para mostrar popup');
+    }
     const purchases = await request(`/users/${userA.clienteId}/purchases`, { token: userA.sessionToken });
-    const pendingPurchase = purchases.find((purchase) => Number(purchase.id) === Number(comebackBid.bid.id));
-    if (!pendingPurchase || pendingPurchase.paymentStatus !== 'pendiente') {
-      throw new Error('La puja ganadora no aparecio como compra pendiente');
+    const wonPurchase = purchases.find((purchase) => Number(purchase.id) === Number(comebackBid.bid.id));
+    if (!wonPurchase || wonPurchase.paymentStatus !== 'pagada') {
+      throw new Error('La puja ganadora no quedo pagada automaticamente');
+    }
+    const afterPaymentRows = await request(`/users/${userA.clienteId}/payments`, { token: userA.sessionToken });
+    const afterLockedPayment = afterPaymentRows.find((payment) => Number(payment.id) === lockedPaymentId);
+    const expectedDebit = Number(wonPurchase.totalDue || 0);
+    if (
+      beforeLockedPayment &&
+      afterLockedPayment &&
+      Math.abs((Number(beforeLockedPayment.amount) - Number(afterLockedPayment.amount)) - expectedDebit) > 0.01
+    ) {
+      throw new Error('No se desconto la garantia del medio de pago al ganar');
     }
     const settled = await request(`/usuarios/me/compras/${comebackBid.bid.id}/confirmar-pago`, {
       method: 'POST',
@@ -1471,7 +1509,7 @@ async function main() {
       token: userPenalty.sessionToken,
       body: JSON.stringify({
         type: 'tarjeta',
-        amount: 50000,
+        amount: 200000,
         cardHolder: 'qa penalidad',
         cardNumber: '4111111111111111',
         expiry: '12/30',
@@ -1511,7 +1549,7 @@ async function main() {
       [penaltyAuctionSeed.itemId]
     );
     const penaltyAuctionDetail = await request(`/auctions/${penaltyAuctionSeed.auctionId}`, { token: userPenalty.sessionToken });
-    const penaltyBidAmount = Math.ceil(Number(penaltyAuctionDetail.basePrice) * 0.02);
+    const penaltyBidAmount = Number(penaltyAuctionDetail.currentBid) + Math.ceil(Number(penaltyAuctionDetail.basePrice) * 0.02);
     const penaltyBid = await request(`/auctions/${penaltyAuctionSeed.auctionId}/bids`, {
       method: 'POST',
       token: userPenalty.sessionToken,

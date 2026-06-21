@@ -170,13 +170,13 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
         throw new Error('Selecciona un medio de pago verificado para pujar.');
       }
       if (leadingActive) {
-        throw new Error('Ya vas primero. Podes salir a mirar otras subastas; te avisamos si te superan.');
+        throw new Error('Ya vas primero. No podes salir de la sala hasta que te superen o cierre el contador.');
       }
 
       const result = await placeBid(user.clienteId, auctionId, parseCurrency(amount), selectedPaymentId);
 
       applyAuctionDetail(result.auction, { forceSuggestedBid: true });
-      setMessage('Puja confirmada. El contador volvio a 1 minuto.');
+      setMessage('Puja confirmada. El contador volvio a 20 segundos.');
       setToast({ message: 'Puja registrada. Vas liderando este lote.', tone: 'success' });
       await load();
     } catch (bidError) {
@@ -206,6 +206,9 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
   function applyAuctionDetail(detail, { forceSuggestedBid = false } = {}) {
     setAuction(detail);
     setSecondsRemaining(Number(detail.closure?.secondsRemaining ?? detail.timerSecondsRemaining ?? 0));
+    if (detail?.lockedPaymentMethodId) {
+      setSelectedPaymentId(Number(detail.lockedPaymentMethodId));
+    }
     if (
       detail?.closure?.winner?.isCurrentUser &&
       detail?.closureStatus === 'en_cuenta' &&
@@ -275,6 +278,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
   const counting = auction.closureStatus === 'en_cuenta' && !finalized;
   const waitingForFirstBid = auction.closureStatus === 'esperando_puja' && !finalized && secondsRemaining > 0;
   const bidDisabled = sending || finalized || !selectedPaymentId || leadingActive;
+  const lockedPaymentMethodId = auction.lockedPaymentMethodId ? Number(auction.lockedPaymentMethodId) : null;
 
   return (
     <View style={styles.container}>
@@ -412,7 +416,7 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
                   const selected = Number(selectedPaymentId) === Number(payment.id);
                   return (
                     <Pressable
-                      disabled={finalized || sending || leadingActive}
+                      disabled={finalized || sending || leadingActive || Boolean(lockedPaymentMethodId)}
                       key={payment.id}
                       onPress={() => setSelectedPaymentId(payment.id)}
                       style={[styles.paymentChip, selected && styles.paymentChipSelected]}
@@ -434,7 +438,9 @@ export default function LiveAuctionScreen({ auctionId, onBack, onNavigate, onOpe
               </View>
             </ScrollView>
             {leadingActive ? (
-              <Text style={styles.paymentLockedText}>Tu oferta líder quedó asociada a este único medio de pago.</Text>
+              <Text style={styles.paymentLockedText}>Tu oferta lider quedo asociada a este unico medio de pago.</Text>
+            ) : lockedPaymentMethodId ? (
+              <Text style={styles.paymentLockedText}>Entraste a esta subasta con este medio de pago. Las siguientes pujas usan el mismo.</Text>
             ) : null}
           </View>
 
@@ -519,12 +525,12 @@ function WinnerCelebration({ celebration, onClose }) {
             <MaterialCommunityIcons color="#73E6A2" name="trophy" size={54} />
             <MaterialCommunityIcons color="#F4C56A" name="star-four-points" size={25} />
           </View>
-          <Text style={styles.winnerTitle}>¡Ganaste!</Text>
+          <Text style={styles.winnerTitle}>Ganaste</Text>
           <Text style={styles.winnerItem}>{celebration.itemTitle}</Text>
           <Text style={styles.winnerText}>
             {celebration.paid
-              ? `Se debitó ${formatMoney(celebration.total)}: puja, comisión y envío incluidos.`
-              : `Ganaste la pieza. El total es ${formatMoney(celebration.total)} y quedó pendiente de cobro.`}
+              ? `Se debito ${formatMoney(celebration.total)}: puja, comision y envio incluidos.`
+              : `Ganaste la pieza. El total es ${formatMoney(celebration.total)} y quedo pendiente de cobro.`}
           </Text>
           <Pressable onPress={onClose} style={styles.winnerButton}>
             <Text style={styles.winnerButtonText}>Continuar</Text>
@@ -1169,3 +1175,4 @@ const styles = StyleSheet.create({
     textAlign: 'center'
   }
 });
+
