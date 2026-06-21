@@ -15,31 +15,46 @@ Comandos:
 ```bash
 npm install
 copy .env.example .env
-docker compose up -d mysql
-npm run db:init
-npm run api
-npm run web
+npm run start -- --clear
 ```
 
-`npm run api` levanta el backend en `http://127.0.0.1:3001/api`. En otra terminal, Expo abre una URL local. Si se quiere fijar puerto:
+Ese modo usa la API online de Render configurada en `.env.example`, por lo que sirve para Expo Go en celular aunque no este corriendo el backend local. Para web:
 
 ```bash
 npm run web -- --port 3002
 ```
 
-Para usar Expo Go en un iPhone fisico, la API no puede apuntar a `127.0.0.1` porque eso seria el propio telefono. En `.env`, configurar la IP Wi-Fi de la PC:
+Para usar Expo Go en un celular fisico:
+
+```bash
+npm run start -- --clear
+```
+
+Despues escanear el QR con Expo Go. Si la red de la facultad bloquea Expo, probar:
+
+```bash
+npm run start -- --tunnel --clear
+```
+
+### Backend local opcional
+
+Si se quiere correr todo local, cambiar en `.env` las URLs del front para que apunten a la PC:
 
 ```text
 EXPO_PUBLIC_WEB_API_URL=http://127.0.0.1:3001/api
 EXPO_PUBLIC_MOBILE_API_URL=http://TU_IP_LAN:3001/api
 ```
 
-Despues reiniciar Expo para que vuelva a leer las variables:
+Luego levantar MySQL y API local:
 
 ```bash
+docker compose up -d mysql
+npm run db:init
 npm run api
 npm run start -- --clear
 ```
+
+En celular, `127.0.0.1` no sirve porque apunta al propio telefono. Para local hay que usar la IP Wi-Fi de la PC o, para la entrega, dejar la API online de Render.
 
 ## Usuario de prueba
 

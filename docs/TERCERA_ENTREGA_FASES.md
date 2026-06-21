@@ -279,3 +279,48 @@ Pruebas clave:
 - Catalogo.
 - Subasta.
 - Notificaciones.
+
+Configuracion recomendada para entrega:
+
+- API online: `https://elitebid.onrender.com/api`.
+- Front Expo apuntando a Render con:
+
+```env
+EXPO_PUBLIC_API_URL=https://elitebid.onrender.com/api
+EXPO_PUBLIC_WEB_API_URL=https://elitebid.onrender.com/api
+EXPO_PUBLIC_MOBILE_API_URL=https://elitebid.onrender.com/api
+APP_PUBLIC_URL=https://elitebid.onrender.com
+```
+
+Comandos de presentacion:
+
+```bash
+npm install
+copy .env.example .env
+npm run start -- --clear
+```
+
+Para Expo Go:
+
+- Escanear el QR desde el celular.
+- Si la WiFi bloquea conexiones locales de Expo, usar `npm run start -- --tunnel --clear`.
+- No hace falta correr `npm run api` si la app apunta a Render.
+
+Trazabilidad de pantallas:
+
+- Login: acceso por email/documento, recuperar contrasena con codigo por email y entrada como invitado.
+- Registro: email, nombre, apellido, DNI/pasaporte, fotos segun tipo de documento, ingreso como invitado y verificacion por codigo.
+- Home/subastas: catalogo visible sin precios para invitados; precios y pujas solo para usuarios habilitados.
+- Detalle de subasta: subasta con catalogo/lista de productos, fotos, categoria requerida y estado.
+- Sala en vivo: puja contra otro usuario, actualizacion de importe, bloqueo de lider y notificacion cuando otro supera la oferta.
+- Perfil: categoria actual, progreso a categorias superiores, datos personales, medios de pago y estado de verificacion.
+- Medios de pago: tarjeta, transferencia y cheque; cheque validado como metodo despues de cargar los datos/foto.
+- Notificaciones: acciones para volver a subasta, verificar cuenta y revisar eventos relevantes.
+
+Estado:
+
+- `.env.example` queda preparado para API online.
+- Permisos iOS actualizados para camara y galeria.
+- Bundle web validado con `npm exec -- expo export --platform web`.
+- QA integral validado con `npm run qa:flow`.
+- Queda pendiente solamente la prueba manual final en un celular real con Expo Go.

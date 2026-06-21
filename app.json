@@ -20,7 +20,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.elitebid.app",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "EliteBid usa tus fotos para cargar el frente y dorso del documento durante el registro."
+        "NSCameraUsageDescription": "EliteBid usa la camara para tomar fotos del documento, cheques y productos o lotes a subastar.",
+        "NSPhotoLibraryUsageDescription": "EliteBid usa tus fotos para cargar documentos, cheques y productos o lotes a subasta."
       }
     },
     "android": {
