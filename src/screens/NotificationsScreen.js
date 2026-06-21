@@ -18,6 +18,7 @@ const actionLabel = {
   open_auction: 'Ver subasta',
   open_auctions: 'Ver subastas',
   open_lots: 'Ver ventas',
+  open_won_bids: 'Ver mis pujas',
   open_penalties: 'Resolver',
   verify_account: 'Verificar'
 };

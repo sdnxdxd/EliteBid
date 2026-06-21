@@ -271,7 +271,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_lotes (
   cuenta_cobro JSON NOT NULL,
   declaracion_titularidad ENUM('si', 'no') DEFAULT 'no',
   acepta_devolucion_cargo ENUM('si', 'no') DEFAULT 'no',
-  estado ENUM('pendiente', 'en_inspeccion', 'aceptado', 'rechazado', 'a_confirmar') DEFAULT 'pendiente',
+  estado ENUM('pendiente', 'en_inspeccion', 'aceptado', 'rechazado', 'a_confirmar', 'en_subasta') DEFAULT 'pendiente',
   motivo_rechazo TEXT,
   ubicacion_deposito VARCHAR(180),
   poliza_seguro VARCHAR(80),
@@ -281,6 +281,8 @@ CREATE TABLE IF NOT EXISTS solicitudes_lotes (
   lugar_subasta VARCHAR(180),
   valor_base DECIMAL(14,2),
   comision DECIMAL(14,2),
+  subasta_generada INT,
+  catalogo_generado INT,
   creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_solicitudes_lotes_cliente FOREIGN KEY (cliente) REFERENCES clientes (identificador)

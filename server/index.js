@@ -16,6 +16,8 @@ const FIRST_BID_TIMER_SECONDS = 3 * 60;
 const COMPANY_CLIENT_ID = 4;
 const SHIPPING_COST = 25000;
 const MAX_GUARANTEE_AMOUNT = 999999999999.99;
+const DEFAULT_REVIEWER_ID = 2;
+const DEFAULT_AUCTIONEER_ID = 2;
 const BID_RANGE_LIMIT_CATEGORIES = new Set(['comun', 'especial', 'plata']);
 const categoryRank = { comun: 1, especial: 2, plata: 3, oro: 4, platino: 5 };
 const categoryRequirements = [
@@ -855,10 +857,8 @@ app.post('/api/solicitudes-venta', wrap(async (req, res) => {
 app.post('/api/solicitudes-venta/:requestId/aceptar-condiciones', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
   const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
-  await run(
-    "UPDATE solicitudes_lotes SET estado = 'aceptado', actualizado_en = CURRENT_TIMESTAMP WHERE identificador = ? AND cliente = ?",
-    [requestId, viewer.clienteId]
-  );
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para aceptar condiciones de venta.');
+  await publishAcceptedSaleRequest(viewer.clienteId, requestId);
   const lot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
   if (!lot) throw new Error('No encontramos esa solicitud.');
   res.json(toSaleRequestContract(lot));
@@ -867,6 +867,12 @@ app.post('/api/solicitudes-venta/:requestId/aceptar-condiciones', wrap(async (re
 app.post('/api/solicitudes-venta/:requestId/rechazar-condiciones', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
   const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
+  await assertNotGuest(viewer.clienteId, 'Verifica tu cuenta para rechazar condiciones de venta.');
+  const currentLot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
+  if (!currentLot) throw new Error('No encontramos esa solicitud.');
+  if (currentLot.status !== 'a_confirmar') {
+    throw new Error('Solo podes rechazar condiciones cuando la solicitud esta a confirmar.');
+  }
   await run(
     "UPDATE solicitudes_lotes SET estado = 'rechazado', motivo_rechazo = COALESCE(?, motivo_rechazo), actualizado_en = CURRENT_TIMESTAMP WHERE identificador = ? AND cliente = ?",
     [normalizeWhitespace(req.body.motivo ?? req.body.reason ?? 'Condiciones rechazadas por el usuario.'), requestId, viewer.clienteId]
@@ -879,7 +885,11 @@ app.post('/api/solicitudes-venta/:requestId/rechazar-condiciones', wrap(async (r
 app.post('/api/solicitudes-venta/:requestId/inspeccion', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
   const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
-  await assertUserLot(viewer.clienteId, requestId);
+  const currentLot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
+  if (!currentLot) throw new Error('No encontramos esa solicitud.');
+  if (!['pendiente', 'en_inspeccion'].includes(currentLot.status)) {
+    throw new Error('Solo podes enviar a inspeccion una solicitud pendiente.');
+  }
   await run(
     `UPDATE solicitudes_lotes
      SET estado = 'en_inspeccion',
@@ -899,7 +909,11 @@ app.post('/api/solicitudes-venta/:requestId/inspeccion', wrap(async (req, res) =
 app.post('/api/solicitudes-venta/:requestId/revision/aceptar', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
   const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
-  await assertUserLot(viewer.clienteId, requestId);
+  const currentLot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
+  if (!currentLot) throw new Error('No encontramos esa solicitud.');
+  if (!['pendiente', 'en_inspeccion', 'a_confirmar'].includes(currentLot.status)) {
+    throw new Error('La solicitud ya no puede ser aprobada para condiciones.');
+  }
   const review = sanitizeLotReviewApproval(req.body);
   await run(
     `UPDATE solicitudes_lotes
@@ -935,7 +949,11 @@ app.post('/api/solicitudes-venta/:requestId/revision/aceptar', wrap(async (req, 
 app.post('/api/solicitudes-venta/:requestId/revision/rechazar', wrap(async (req, res) => {
   const viewer = await requireAuthenticatedClient(req);
   const requestId = parsePositiveInt(req.params.requestId, 'Solicitud invalida.');
-  await assertUserLot(viewer.clienteId, requestId);
+  const currentLot = (await getUserLots(viewer.clienteId)).find((item) => Number(item.id) === requestId);
+  if (!currentLot) throw new Error('No encontramos esa solicitud.');
+  if (['rechazado', 'en_subasta'].includes(currentLot.status)) {
+    throw new Error('La solicitud ya no puede rechazarse desde revision.');
+  }
   const reason = normalizeLotText(req.body.motivo ?? req.body.reason, 'Indica el motivo del rechazo.', 1000, 8);
   await run(
     `UPDATE solicitudes_lotes
@@ -2351,12 +2369,12 @@ async function getUserNotifications(viewer) {
       const totalDue = Number(pendingPurchase.amount || 0) + Number(pendingPurchase.commission || 0) + SHIPPING_COST;
       notifications.push({
         id: `purchase-due-${pendingPurchase.bidId}`,
-        action: 'open_purchases',
+        action: 'open_won_bids',
         createdAt: new Date().toISOString(),
         description: `${pendingPurchase.title}: puja ${formatMoney(pendingPurchase.amount)}, comision ${formatMoney(pendingPurchase.commission)} y envio ${formatMoney(SHIPPING_COST)}. Total ${formatMoney(totalDue)}.`,
         priority: 'alta',
         read: false,
-        target: 'purchases',
+        target: 'wonBids',
         title: 'Subasta adjudicada'
       });
     }
@@ -2573,6 +2591,7 @@ async function getUserLots(clienteId) {
       poliza_seguro AS insurancePolicy, aseguradora AS insuranceCompany,
       DATE_FORMAT(fecha_subasta, '%Y-%m-%d') AS auctionDate, hora_subasta AS auctionTime,
       lugar_subasta AS auctionLocation, valor_base AS basePrice, comision AS commission,
+      subasta_generada AS generatedAuctionId, catalogo_generado AS generatedCatalogId,
       creado_en AS createdAt, actualizado_en AS updatedAt
      FROM solicitudes_lotes
      WHERE cliente = ?
@@ -2705,6 +2724,160 @@ async function createLotSubmission(clienteId, lot) {
   return result;
 }
 
+async function publishAcceptedSaleRequest(clienteId, requestId) {
+  const lot = (await getUserLots(clienteId)).find((item) => Number(item.id) === Number(requestId));
+  if (!lot) throw new Error('No encontramos esa solicitud.');
+  if (lot.status === 'en_subasta' && lot.generatedAuctionId) {
+    return lot.generatedAuctionId;
+  }
+  if (lot.status !== 'a_confirmar') {
+    throw new Error('La solicitud debe estar aprobada por la empresa y pendiente de confirmacion.');
+  }
+  assertLotReadyForAuction(lot);
+
+  await ensureOwnerProfile(clienteId);
+  await ensureInsurance(lot);
+
+  const category = getAuctionCategoryForBase(Number(lot.basePrice || 0) * Math.max(1, lot.items?.length || 1));
+  const auction = await run(
+    `INSERT INTO subastas (
+      titulo, fecha, hora, estado, subastador, ubicacion, capacidad_asistentes,
+      tiene_deposito, seguridad_propia, categoria, moneda, imagen_uri
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      `Venta de ${lot.title}`,
+      lot.auctionDate,
+      lot.auctionTime,
+      'programada',
+      DEFAULT_AUCTIONEER_ID,
+      lot.auctionLocation,
+      80,
+      'si',
+      'si',
+      category,
+      'ARS',
+      lot.items?.[0]?.photoUris?.[0] || lot.photoUris?.[0] || null
+    ]
+  );
+
+  const catalog = await run(
+    'INSERT INTO catalogos (descripcion, subasta, responsable) VALUES (?, ?, ?)',
+    [`Catalogo generado desde solicitud ${requestId}: ${lot.title}`.slice(0, 220), auction.insertId, DEFAULT_REVIEWER_ID]
+  );
+
+  for (const [index, item] of (lot.items || []).entries()) {
+    const product = await run(
+      `INSERT INTO productos (
+        fecha, disponible, descripcion_catalogo, descripcion_completa, revisor, duenio, seguro, imagen_uri
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        lot.auctionDate,
+        'si',
+        item.title,
+        buildLotProductDescription(lot, item),
+        DEFAULT_REVIEWER_ID,
+        clienteId,
+        lot.insurancePolicy,
+        item.photoUris?.[0] || null
+      ]
+    );
+
+    for (const [photoIndex, uri] of (item.photoUris || []).entries()) {
+      await run('INSERT INTO fotos (producto, uri, orden) VALUES (?, ?, ?)', [
+        product.insertId,
+        uri,
+        photoIndex + 1
+      ]);
+    }
+
+    await run(
+      `INSERT INTO items_catalogo (
+        catalogo, orden_lote, producto, precio_base, comision, subastado, puja_actual, cierre_estado
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        catalog.insertId,
+        index + 1,
+        product.insertId,
+        lot.basePrice,
+        lot.commission,
+        'no',
+        0,
+        'esperando_puja'
+      ]
+    );
+  }
+
+  await run(
+    `UPDATE solicitudes_lotes
+     SET estado = 'en_subasta',
+       subasta_generada = ?,
+       catalogo_generado = ?,
+       actualizado_en = CURRENT_TIMESTAMP
+     WHERE identificador = ? AND cliente = ?`,
+    [auction.insertId, catalog.insertId, requestId, clienteId]
+  );
+
+  return auction.insertId;
+}
+
+function assertLotReadyForAuction(lot) {
+  const required = [
+    [lot.auctionDate, 'La empresa debe indicar fecha de subasta antes de publicar.'],
+    [lot.auctionTime, 'La empresa debe indicar hora de subasta antes de publicar.'],
+    [lot.auctionLocation, 'La empresa debe indicar lugar de subasta antes de publicar.'],
+    [lot.storageLocation, 'La empresa debe indicar deposito antes de publicar.'],
+    [lot.insurancePolicy, 'La empresa debe indicar poliza de seguro antes de publicar.'],
+    [lot.insuranceCompany, 'La empresa debe indicar aseguradora antes de publicar.']
+  ];
+  for (const [value, message] of required) {
+    if (!String(value ?? '').trim()) throw new Error(message);
+  }
+  if (Number(lot.basePrice || 0) <= 0) throw new Error('La empresa debe indicar un valor base valido antes de publicar.');
+  if (Number(lot.commission || 0) <= 0) throw new Error('La empresa debe indicar una comision valida antes de publicar.');
+  if (!Array.isArray(lot.items) || !lot.items.length) throw new Error('La solicitud no tiene productos para catalogar.');
+  for (const [index, item] of lot.items.entries()) {
+    if ((item.photoUris || []).length < 6) {
+      throw new Error(`El producto ${index + 1} necesita al menos 6 fotos para publicarse en catalogo.`);
+    }
+  }
+}
+
+async function ensureOwnerProfile(clienteId) {
+  await run(
+    `INSERT IGNORE INTO duenios (
+      identificador, numero_pais, verificacion_financiera, verificacion_judicial, calificacion_riesgo, verificador
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [clienteId, 32, 'si', 'si', 2, DEFAULT_REVIEWER_ID]
+  );
+}
+
+async function ensureInsurance(lot) {
+  await run(
+    `INSERT IGNORE INTO seguros (nro_poliza, compania, poliza_combinada, importe)
+     VALUES (?, ?, ?, ?)`,
+    [lot.insurancePolicy, lot.insuranceCompany, (lot.items?.length || 0) > 1 ? 'si' : 'no', lot.basePrice]
+  );
+}
+
+function buildLotProductDescription(lot, item) {
+  return [
+    item.description,
+    `Estado: ${item.conditionText || item.condition || 'pendiente de detalle'}.`,
+    `Historia: ${item.history || 'sin historia adicional declarada'}.`,
+    `Origen: ${lot.legalOrigin}.`,
+    `Deposito: ${lot.storageLocation}.`
+  ].filter(Boolean).join('\n');
+}
+
+function getAuctionCategoryForBase(totalBasePrice) {
+  const value = Number(totalBasePrice || 0);
+  if (value >= 50000000) return 'platino';
+  if (value >= 20000000) return 'oro';
+  if (value >= 5000000) return 'plata';
+  if (value >= 1000000) return 'especial';
+  return 'comun';
+}
+
 function toSaleRequestContract(lot) {
   return {
     ...lot,
@@ -2717,6 +2890,8 @@ function toSaleRequestContract(lot) {
     aseguradora: lot.insuranceCompany,
     comision: lot.commission,
     fechaSubasta: lot.auctionDate,
+    generatedAuctionId: lot.generatedAuctionId,
+    generatedCatalogId: lot.generatedCatalogId,
     items: lot.items || [],
     lugarSubasta: lot.auctionLocation,
     productos: lot.items || [],

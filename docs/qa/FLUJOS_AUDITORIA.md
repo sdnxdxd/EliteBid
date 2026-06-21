@@ -42,12 +42,11 @@ El seed borra y recrea solo usuarios `demo.elitebid.*@elitebid.test`.
 | Perfil | Sin sesion bloqueado, sesion ajena bloqueada, documento/nombre inmutables | OK |
 | Categoria | Comun, plata por metricas, progreso desde Perfil | OK |
 | Penalidades | Penalidad activa visible, accion resoluble, frena ascensos | OK |
-| Ventas/lotes | Sin fotos rechazado, lote valido queda pendiente/en inspeccion | OK |
-| Notificaciones | Cuenta pendiente, pago faltante, penalidad, lote, subasta futura | OK |
+| Ventas/lotes | Sin fotos rechazado, lote valido queda pendiente/en inspeccion, revision aprobada, usuario acepta condiciones y se genera subasta con catalogo/fotos | OK |
+| Notificaciones | Cuenta pendiente, pago faltante, penalidad, lote, subasta futura, sobrepuja y compra ganada | OK |
 
 ## Posibles mejoras pendientes
 
-- Separar claramente `Compras` y `Mis ventas`: hoy comparten pantalla y puede confundir en demo.
 - Agregar un estado visual para "mail no enviado todavia" en Login/Reenviar cuando SMTP falla.
 - Mostrar boton directo desde Login hacia `Reenviar codigo de invitado` solo despues de error de codigo vencido, para reducir ruido.
 - Agregar filtros por categoria en subastas si quieren demostrar mejor comun/especial/plata/oro/platino.
@@ -71,6 +70,21 @@ Se ejecuto `npm run qa:flow` completo con 32 chequeos OK:
 - Compra: la puja ganadora queda pendiente y luego se registra como pagada.
 
 Tambien se ejecuto `npx expo export --platform web` sin errores de compilacion.
+
+## Resultado QA 21/06/2026
+
+Se ejecuto `npm run qa:flow` completo y `npm exec -- expo export --platform web` sin errores.
+
+Cobertura reforzada:
+
+- Carga de lote propio con validacion de fotos, titularidad, origen licito y cuenta de cobro.
+- Revision de empresa con deposito, poliza, aseguradora, fecha/hora/lugar, precio base y comision.
+- Aceptacion de condiciones por el usuario: genera `subastas`, `catalogos`, `productos`, `items_catalogo`, `fotos`, `seguros` y `duenios`.
+- `Mis ventas` muestra el estado `en_subasta` y referencia la subasta generada.
+- La solicitud publicada ya no puede rechazarse ni volver a revision.
+- Notificacion de compra ganada dirige a `Mis pujas`, no a `Mis ventas`.
+- Versus de pujas: usuario A oferta, usuario B supera, A recibe notificacion, ve precio actualizado y contraoferta.
+- Compra ganada, pago registrado, falta de fondos y penalidad de 10% siguen pasando.
 
 ## Resultado QA Auth 06/06/2026
 

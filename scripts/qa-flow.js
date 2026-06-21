@@ -603,6 +603,36 @@ async function cleanup(db, touched = {}) {
   );
 
   for (const row of rows) {
+    const [generatedAuctions] = await db.query(
+      `SELECT subasta_generada AS auctionId
+       FROM solicitudes_lotes
+       WHERE cliente = ? AND subasta_generada IS NOT NULL`,
+      [row.clienteId]
+    );
+    for (const generated of generatedAuctions) {
+      await db.query(
+        `DELETE f FROM fotos f
+         JOIN productos p ON p.identificador = f.producto
+         JOIN items_catalogo i ON i.producto = p.identificador
+         JOIN catalogos c ON c.identificador = i.catalogo
+         WHERE c.subasta = ?`,
+        [generated.auctionId]
+      );
+      await db.query(
+        `DELETE i FROM items_catalogo i
+         JOIN catalogos c ON c.identificador = i.catalogo
+         WHERE c.subasta = ?`,
+        [generated.auctionId]
+      );
+      await db.query('DELETE FROM catalogos WHERE subasta = ?', [generated.auctionId]);
+      await db.query(
+        `DELETE p FROM productos p
+         LEFT JOIN items_catalogo i ON i.producto = p.identificador
+         WHERE p.duenio = ? AND i.identificador IS NULL`,
+        [row.clienteId]
+      );
+      await db.query('DELETE FROM subastas WHERE identificador = ?', [generated.auctionId]);
+    }
     await db.query(
       'DELETE fl FROM fotos_lote fl JOIN solicitudes_lotes sl ON sl.identificador = fl.solicitud WHERE sl.cliente = ?',
       [row.clienteId]
@@ -624,6 +654,7 @@ async function cleanup(db, touched = {}) {
     await db.query('DELETE FROM sesiones WHERE usuario_id = ?', [row.id]);
     await db.query('DELETE FROM usuarios WHERE id = ?', [row.id]);
     await db.query('DELETE FROM documentos_identidad WHERE persona_id = ?', [row.clienteId]);
+    await db.query('DELETE FROM duenios WHERE identificador = ?', [row.clienteId]);
     await db.query('DELETE FROM clientes WHERE identificador = ?', [row.clienteId]);
     await db.query('DELETE FROM personas WHERE identificador = ?', [row.clienteId]);
   }
@@ -1111,16 +1142,57 @@ async function main() {
       throw new Error('La revision aceptada no dejo el lote a confirmar con seguro');
     }
     const acceptedLot = await request(`/solicitudes-venta/${createdLot.id}/aceptar-condiciones`, { method: 'POST', token: userA.sessionToken });
-    if (acceptedLot.estado !== 'aceptado') throw new Error('Aceptar condiciones no dejo el lote aceptado');
+    if (acceptedLot.estado !== 'en_subasta' || !acceptedLot.generatedAuctionId) {
+      throw new Error('Aceptar condiciones no publico el lote como subasta');
+    }
+    const generatedAuction = await request(`/auctions/${acceptedLot.generatedAuctionId}`, { token: userA.sessionToken });
+    if (generatedAuction.status !== 'programada' || !Array.isArray(generatedAuction.catalog) || generatedAuction.catalog.length !== 1) {
+      throw new Error('La subasta generada no quedo programada con catalogo');
+    }
+    if ((generatedAuction.catalog[0].photoUrls || []).length < 6) {
+      throw new Error('La subasta generada no conservo las fotos del producto');
+    }
+    const acceptedAgain = await request(`/solicitudes-venta/${createdLot.id}/aceptar-condiciones`, { method: 'POST', token: userA.sessionToken });
+    if (Number(acceptedAgain.generatedAuctionId) !== Number(acceptedLot.generatedAuctionId)) {
+      throw new Error('Aceptar condiciones dos veces genero otra subasta');
+    }
     const pdfGoods = await request('/mis-bienes', { token: userA.sessionToken });
     if (!Array.isArray(pdfGoods) || !pdfGoods.some((lot) => Number(lot.id) === Number(createdLot.id))) {
-      throw new Error('/mis-bienes no devolvio el lote aceptado');
+      throw new Error('/mis-bienes no devolvio el lote publicado');
     }
     const insurance = await request(`/mis-bienes/${createdLot.id}/seguro`, { token: userA.sessionToken });
     if (insurance.poliza !== 'POL-QA-001' || insurance.estado !== 'vigente') throw new Error('/mis-bienes/{id}/seguro no devolvio poliza vigente');
     const location = await request(`/mis-bienes/${createdLot.id}/ubicacion`, { token: userA.sessionToken });
     if (location.ubicacion !== 'Deposito Qa Norte') throw new Error('/mis-bienes/{id}/ubicacion no devolvio deposito');
-    const rejectedByUser = await request(`/solicitudes-venta/${createdLot.id}/rechazar-condiciones`, {
+    await expectReject('lote publicado no se puede rechazar despues', () =>
+      request(`/solicitudes-venta/${createdLot.id}/rechazar-condiciones`, {
+        method: 'POST',
+        token: userA.sessionToken,
+        body: JSON.stringify({ motivo: 'QA rechazo tardio' })
+      }), 'a confirmar');
+    logOk('aceptar condiciones genera subasta con catalogo');
+
+    const rejectionRows = await request(`/users/${userA.clienteId}/lots`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({ ...validLotPayload(), title: 'Lote QA Rechazo Condiciones' })
+    });
+    const rejectionLot = rejectionRows.find((lot) => lot.title === 'Lote QA Rechazo Condiciones');
+    await request(`/solicitudes-venta/${rejectionLot.id}/revision/aceptar`, {
+      method: 'POST',
+      token: userA.sessionToken,
+      body: JSON.stringify({
+        auctionDate: futureDate(25),
+        auctionLocation: 'Sala QA Rechazo',
+        auctionTime: '18:15',
+        basePrice: 110000,
+        commission: 9000,
+        insuranceCompany: 'Aseguradora QA',
+        insurancePolicy: 'POL-QA-RECHAZO',
+        storageLocation: 'Deposito QA Sur'
+      })
+    });
+    const rejectedByUser = await request(`/solicitudes-venta/${rejectionLot.id}/rechazar-condiciones`, {
       method: 'POST',
       token: userA.sessionToken,
       body: JSON.stringify({ motivo: 'QA rechazo condiciones' })

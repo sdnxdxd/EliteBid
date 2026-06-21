@@ -63,6 +63,11 @@ const statusCopy = {
     label: 'En inspeccion',
     tone: '#F4C56A'
   },
+  en_subasta: {
+    icon: 'gavel',
+    label: 'En subasta',
+    tone: '#73E6A2'
+  },
   pendiente: {
     icon: 'clock-outline',
     label: 'Pendiente',
@@ -623,6 +628,14 @@ function StatusDetail({ lot }) {
     return (
       <Text style={styles.statusDetail}>
         Base: {formatMoney(lot.basePrice)} / Comision: {formatMoney(lot.commission)}
+      </Text>
+    );
+  }
+
+  if (lot.status === 'en_subasta') {
+    return (
+      <Text style={styles.statusDetail}>
+        Publicado en subasta #{lot.generatedAuctionId}. Fecha: {lot.auctionDate} {lot.auctionTime}. Base: {formatMoney(lot.basePrice)}
       </Text>
     );
   }

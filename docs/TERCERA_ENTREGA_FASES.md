@@ -194,7 +194,7 @@ Debe cubrir:
 - Declaracion de titularidad.
 - Origen licito.
 - Cuenta declarada para cobrar antes de la subasta.
-- Estado de inspeccion, aceptado, rechazado o a confirmar.
+- Estado de inspeccion, a confirmar, rechazado o en subasta.
 - Ver deposito, poliza y aseguradora.
 
 Pruebas clave:
@@ -213,12 +213,14 @@ Flujo cubierto:
 4. La empresa puede marcar la solicitud en inspeccion.
 5. La empresa puede aceptar la revision indicando deposito, poliza, aseguradora, fecha/hora/lugar de subasta, precio base y comision.
 6. La solicitud queda `a_confirmar` para que el usuario acepte o rechace las condiciones.
-7. Si acepta, el bien aparece en `mis-bienes` con seguro y ubicacion.
-8. Si la empresa o el usuario rechaza, queda el motivo visible.
+7. Si acepta, se generan `subastas`, `catalogos`, `productos`, `items_catalogo`, `fotos`, `seguros` y `duenios`.
+8. El bien aparece en `mis-bienes` como `en_subasta`, con seguro, ubicacion y referencia a la subasta generada.
+9. Si la empresa o el usuario rechaza antes de publicar, queda el motivo visible.
 
 Estado:
 
 - Cubierto en API, UI y QA automatizado.
+- QA 21/06/2026: validado que aceptar condiciones genera una subasta programada con catalogo y fotos, sin duplicar al volver a consultar.
 
 ## Fase 7 - Backend online y endpoints probables
 

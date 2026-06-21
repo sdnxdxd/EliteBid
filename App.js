@@ -227,6 +227,11 @@ export default function App() {
       setAppView('purchases');
       return;
     }
+    if (target === 'wonBids') {
+      setNotificationsBackView('notifications');
+      setAppView('wonBids');
+      return;
+    }
     if (target.startsWith('auction:')) {
       setSelectedAuctionId(Number(target.split(':')[1]));
       setDetailBackView('notifications');
@@ -330,13 +335,16 @@ export default function App() {
           onOpenPayments={() => openPayments('profile')}
           onOpenNotifications={() => openNotifications('profile')}
           onOpenPenalties={() => setAppView('penalties')}
-          onOpenWonBids={() => setAppView('wonBids')}
+          onOpenWonBids={() => {
+            setNotificationsBackView('profile');
+            setAppView('wonBids');
+          }}
           onSignOut={handleSignOut}
           onUserUpdated={setUser}
           user={user}
         />
       ) : user && appView === 'wonBids' ? (
-        <WonBidsScreen onBack={() => setAppView('profile')} onNavigate={navigateTab} user={user} />
+        <WonBidsScreen onBack={() => setAppView(notificationsBackView === 'notifications' ? 'notifications' : 'profile')} onNavigate={navigateTab} user={user} />
       ) : user && appView === 'penalties' ? (
         <PenaltiesScreen onBack={() => setAppView(notificationsBackView === 'notifications' ? 'notifications' : 'profile')} user={user} />
       ) : user && appView === 'notifications' ? (

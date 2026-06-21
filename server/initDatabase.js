@@ -56,6 +56,17 @@ async function migrateSecuritySchema() {
     'composicion',
     'ALTER TABLE solicitudes_lotes ADD COLUMN composicion TEXT AFTER valor_estimado'
   );
+  await run("ALTER TABLE solicitudes_lotes MODIFY estado ENUM('pendiente', 'en_inspeccion', 'aceptado', 'rechazado', 'a_confirmar', 'en_subasta') DEFAULT 'pendiente'");
+  await addColumnIfMissing(
+    'solicitudes_lotes',
+    'subasta_generada',
+    'ALTER TABLE solicitudes_lotes ADD COLUMN subasta_generada INT AFTER comision'
+  );
+  await addColumnIfMissing(
+    'solicitudes_lotes',
+    'catalogo_generado',
+    'ALTER TABLE solicitudes_lotes ADD COLUMN catalogo_generado INT AFTER subasta_generada'
+  );
   await addColumnIfMissing(
     'usuarios',
     'email_verificado',
