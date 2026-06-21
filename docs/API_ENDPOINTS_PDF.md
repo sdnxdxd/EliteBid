@@ -83,6 +83,9 @@ Los endpoints del PDF se exponen con prefijo `/api`. Los endpoints `/admin/...` 
 | `GET /solicitudes-venta/{id}` | Implementado. |
 | `POST /solicitudes-venta/{id}/aceptar-condiciones` | Implementado con estado interno `aceptado`. |
 | `POST /solicitudes-venta/{id}/rechazar-condiciones` | Implementado con estado interno `rechazado`. |
+| `POST /solicitudes-venta/{id}/inspeccion` | Extra implementado para simular revision de empresa y deposito. |
+| `POST /solicitudes-venta/{id}/revision/aceptar` | Extra implementado para aceptacion de empresa con fecha, base, comision, seguro y deposito. |
+| `POST /solicitudes-venta/{id}/revision/rechazar` | Extra implementado para rechazo de empresa con motivo visible. |
 | `GET /mis-bienes` | Implementado. |
 | `GET /mis-bienes/{productoId}/seguro` | Implementado con estado basico. |
 | `GET /mis-bienes/{productoId}/ubicacion` | Implementado con ubicacion disponible o pendiente. |
@@ -105,3 +108,22 @@ npm run qa:flow
 ```
 
 La suite automatizada cubre login/registro, rutas compatibles con el PDF, pagos, venta de lotes, subastas, favoritos, pujas, compras y notificaciones.
+
+## API online
+
+URL publica actual:
+
+```text
+https://elitebid.onrender.com/api
+```
+
+Pruebas rapidas:
+
+```text
+GET https://elitebid.onrender.com/api/health
+GET https://elitebid.onrender.com/api/auctions/home
+GET https://elitebid.onrender.com/api/auctions/7
+POST https://elitebid.onrender.com/api/auth/login
+```
+
+`/api/health` debe devolver `ok: true`. Los endpoints publicos de subastas deben ocultar precios cuando no hay sesion. Los endpoints protegidos deben devolver error JSON si no hay token.

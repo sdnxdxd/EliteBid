@@ -241,6 +241,27 @@ Pruebas clave:
 - Pujar.
 - Recuperar contrasena.
 
+URL online:
+
+- API: `https://elitebid.onrender.com/api`
+
+Pruebas online realizadas:
+
+- `GET /api/health`: responde `ok: true` y `emailProviderConfigured: true`.
+- `GET /api/auctions/home`: responde catalogo publico con precios reservados en `null`.
+- `GET /api/subastas`: responde catalogo publico con precios reservados en `null`.
+- `GET /api/auctions/7`: responde detalle publico con catalogo, productos y `photoUrls`, sin revelar precios.
+- `POST /api/auth/login` sin body: responde error JSON controlado.
+- `GET /api/solicitudes-venta` sin token: responde error JSON controlado.
+- `GET /api/notificaciones` sin token: responde error JSON controlado.
+
+Estado:
+
+- Backend online funcionando en Render.
+- MySQL online conectado.
+- Deploy toma `render.yaml`.
+- Queda pendiente hacer una ronda autenticada online con usuario real/demo si se quiere probar escritura completa en la base remota desde Postman.
+
 ## Fase 8 - Frontend en dispositivo y trazabilidad
 
 Debe cubrir:
